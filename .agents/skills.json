@@ -1,0 +1,206 @@
+{
+  "$schema": "https://agentskills.io/schema/skills.json",
+  "version": "1.0.0",
+  "project": "G10-Equipo38-NuevaMente",
+  "description": "Skills maestras para el desarrollo integral, orquestación RAG, arquitectura OCI y diseño UI de NuevaMente",
+  "skills": [
+    {
+      "name": "spec-driven-development",
+      "path": ".agents/skills/spec-driven-development/SKILL.md",
+      "category": "Metodología y Calidad",
+      "description": "Crea especificaciones estructuradas antes de codificar. Define mapas de capacidades, criterios de aceptación y especificaciones formales para evitar asunciones y retrabajo.",
+      "triggers": [
+        "spec",
+        "prd",
+        "requisitos",
+        "especificacion",
+        "planificar caracteristica"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "domain-modeling",
+      "path": ".agents/skills/domain-modeling/SKILL.md",
+      "category": "Dominio y Modelado",
+      "description": "Construye y refina el modelo de dominio de NuevaMente en CONTEXT.md y registra decisiones arquitectónicas irreversibles en docs/adr/.",
+      "triggers": [
+        "glosario",
+        "vocabulario",
+        "modelo de dominio",
+        "adr",
+        "context.md"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "grill-with-docs",
+      "path": ".agents/skills/grill-with-docs/SKILL.md",
+      "category": "Dominio y Modelado",
+      "description": "Entrevista socrática implacable mediante árbol de diseño y frontera de preguntas para estresar requisitos mientras genera ADRs y glosario en tiempo real.",
+      "triggers": [
+        "grill",
+        "estresar idea",
+        "cuestionar diseno",
+        "entrevista tecnica",
+        "aclarar requerimientos"
+      ],
+      "dependencies": ["domain-modeling"]
+    },
+    {
+      "name": "archify-system-design",
+      "path": ".agents/skills/archify-system-design/SKILL.md",
+      "category": "Arquitectura y Diagramación",
+      "description": "Modela la arquitectura visual y técnica del sistema con diagramas Mermaid, C4 y balizas de evidencia enlazadas al código fuente para el README.",
+      "triggers": [
+        "arquitectura",
+        "diagrama",
+        "c4",
+        "flujo del sistema",
+        "evidence beacons",
+        "readme diagram"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "api-and-interface-design",
+      "path": ".agents/skills/api-and-interface-design/SKILL.md",
+      "category": "Metodología y Calidad",
+      "description": "Diseña contratos de interfaz estables, APIs REST, modelos de datos Pydantic y boundaries limpios entre agentes, backend y frontend.",
+      "triggers": [
+        "api",
+        "contrato de datos",
+        "schemas",
+        "endpoints",
+        "pydantic models"
+      ],
+      "dependencies": ["domain-modeling"]
+    },
+    {
+      "name": "rag-and-grounding",
+      "path": ".agents/skills/rag-and-grounding/SKILL.md",
+      "category": "Habilidades de Dominio de NuevaMente",
+      "description": "Pipeline RAG para ingestión de PDFs/Markdown, chunking semántico, almacenamiento en ChromaDB y verificación de fidelidad con el algoritmo Ragas para anclaje_fuente_score (0.0 a 1.0).",
+      "triggers": [
+        "rag",
+        "chunking",
+        "chromadb",
+        "embeddings",
+        "anclaje_fuente_score",
+        "fidelidad",
+        "ragas",
+        "ingestion"
+      ],
+      "dependencies": ["api-and-interface-design"]
+    },
+    {
+      "name": "pedagogical-orchestrator",
+      "path": ".agents/skills/pedagogical-orchestrator/SKILL.md",
+      "category": "Habilidades de Dominio de NuevaMente",
+      "description": "Grafo multi-agente en LangGraph (Supervisor, Researcher, Writer, Critic) adaptando contenidos a 4 perfiles y 5 formatos pedagógicos con esquemas Pydantic y helper Anki (.apkg/CSV).",
+      "triggers": [
+        "langgraph",
+        "multi-agent",
+        "agentes",
+        "pedagogia",
+        "tutorial",
+        "flashcards",
+        "quiz",
+        "anki",
+        "perfiles"
+      ],
+      "dependencies": ["rag-and-grounding", "api-and-interface-design"]
+    },
+    {
+      "name": "oci-always-free-storage",
+      "path": ".agents/skills/oci-always-free-storage/SKILL.md",
+      "category": "Habilidades de Dominio de NuevaMente",
+      "description": "Integración con Oracle Cloud Infrastructure Object Storage SDK (oci-sdk) bajo política estricta Always Free ($0.00) en el bucket nuevamente-contenidos-educativos y fallback mock local.",
+      "triggers": [
+        "oci",
+        "oracle cloud",
+        "object storage",
+        "always free",
+        "bucket",
+        "mock storage",
+        "persistencia"
+      ],
+      "dependencies": ["api-and-interface-design"]
+    },
+    {
+      "name": "linear-design-system",
+      "path": ".agents/skills/linear-design-system/SKILL.md",
+      "category": "Frontend UI",
+      "description": "Sistema de diseño oscuro de alta precisión inspirado en Linear (#010102, #5e6ad2) para Streamlit y Gradio con componentes de quizzes, flashcards, métricas y badges.",
+      "triggers": [
+        "linear",
+        "diseno ui",
+        "css",
+        "tema oscuro",
+        "estilo streamlit",
+        "componentes visuales",
+        "tarjetas"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "frontend-ui-engineering",
+      "path": ".agents/skills/frontend-ui-engineering/SKILL.md",
+      "category": "Frontend UI",
+      "description": "Construye interfaces de usuario accesibles, responsivas y de grado productivo evitando estéticas genéricas de IA y aplicando composición de componentes limpia.",
+      "triggers": [
+        "frontend",
+        "ui",
+        "componentes",
+        "accesibilidad",
+        "wcag",
+        "responsive"
+      ],
+      "dependencies": ["linear-design-system"]
+    },
+    {
+      "name": "security-and-hardening",
+      "path": ".agents/skills/security-and-hardening/SKILL.md",
+      "category": "Metodología y Calidad",
+      "description": "Protección contra vulnerabilidades, sanitización de entradas, prevención de prompt injection, gestión segura de secretos de API (claves OCI y LLM) y OWASP.",
+      "triggers": [
+        "seguridad",
+        "owasp",
+        "prompt injection",
+        "secretos",
+        "hardening",
+        "sanitizacion"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "debugging-and-error-recovery",
+      "path": ".agents/skills/debugging-and-error-recovery/SKILL.md",
+      "category": "Metodología y Calidad",
+      "description": "Metodología sistemática Stop-the-Line para triaje de errores en pruebas, fallos de conexión a OCI, excepciones en grafos de LangGraph o rotura de pipelines.",
+      "triggers": [
+        "debug",
+        "error",
+        "fallo",
+        "triage",
+        "stop the line",
+        "fix bug"
+      ],
+      "dependencies": []
+    },
+    {
+      "name": "git-workflow-and-versioning",
+      "path": ".agents/skills/git-workflow-and-versioning/SKILL.md",
+      "category": "Metodología y Calidad",
+      "description": "Estructuración de ramas, commits atómicos basados en Trunk-Based Development, Conventional Commits y preparación de releases y changelog.",
+      "triggers": [
+        "git",
+        "commit",
+        "branch",
+        "pull request",
+        "versionado",
+        "release"
+      ],
+      "dependencies": []
+    }
+  ]
+}
