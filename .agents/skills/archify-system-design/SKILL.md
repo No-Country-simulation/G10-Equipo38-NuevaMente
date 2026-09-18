@@ -74,8 +74,11 @@ flowchart TB
     end
 
     subgraph EXPORT ["Multi-Format Exporters"]
-        AnkiExport["Anki Deck (.apkg / CSV)"]
+        ExportRouter["Format Packaging Engine"]
+        AnkiExport["Anki Deck (.apkg / TSV)"]
         DocExport["PDF & Markdown Exporter"]
+        ExportRouter --> AnkiExport
+        ExportRouter --> DocExport
     end
 
     %% Flows
@@ -92,12 +95,10 @@ flowchart TB
     Threshold -- "Yes (Score >= 0.85)" --> Display
     Threshold -- "Yes" --> ScoreWidget
     Threshold -- "Yes" --> OCIClient
-    Threshold -- "Yes" --> Export
+    Threshold -- "Yes" --> ExportRouter
 
     OCIClient --> Bucket
     OCIClient -. "Fallback (offline/no-creds)" .-> MockFallback
-    Export --> AnkiExport
-    Export --> DocExport
 ```
 
 ---

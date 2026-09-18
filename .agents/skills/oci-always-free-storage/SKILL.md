@@ -65,6 +65,10 @@ class StorageProvider:
         
     def get_content(self, object_name: str) -> bytes:
         raise NotImplementedError
+
+    def get_content_as_text(self, object_name: str) -> str:
+        """Helper to retrieve content decoded as UTF-8 text."""
+        return self.get_content(object_name).decode("utf-8")
         
     def list_contents(self, prefix: str = "") -> List[str]:
         raise NotImplementedError
@@ -107,11 +111,11 @@ class OCIObjectStorageProvider(StorageProvider):
     """Production provider connecting to Oracle Cloud Infrastructure Object Storage."""
     
     def __init__(self, bucket_name: str = DEFAULT_BUCKET_NAME, config_file: Optional[str] = None):
-        import oci
         self.bucket_name = bucket_name
         
         # Load OCI configuration from default file or environment variables
         try:
+            import oci
             if config_file and os.path.exists(config_file):
                 self.config = oci.config.from_file(config_file)
             elif os.path.exists(os.path.expanduser("~/.oci/config")):

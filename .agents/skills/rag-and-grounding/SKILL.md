@@ -49,10 +49,14 @@ Raw Document (PDF/MD/TXT)
 ```python
 from pathlib import Path
 from typing import List, Dict, Any
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredMarkdownLoader
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
+
+try:
+    from langchain_chroma import Chroma
+except ImportError:
+    from langchain_community.vectorstores import Chroma
 
 def load_document(file_path: str | Path) -> List[Document]:
     path = Path(file_path)
@@ -60,12 +64,10 @@ def load_document(file_path: str | Path) -> List[Document]:
     
     if suffix == ".pdf":
         loader = PyPDFLoader(str(path))
-    elif suffix in [".md", ".markdown"]:
-        loader = UnstructuredMarkdownLoader(str(path))
-    elif suffix in [".txt", ".rst"]:
+    elif suffix in [".md", ".markdown", ".txt", ".rst"]:
         loader = TextLoader(str(path), encoding="utf-8")
     else:
-        raise ValueError(f"Unsupported file format: {suffix}")
+        raise ValueError(f"Unsupported file format: {suffix}. Supported formats: .pdf, .md, .markdown, .txt, .rst")
         
     docs = loader.load()
     # Enrich metadata
@@ -139,6 +141,9 @@ class StatementJudgement(BaseModel):
     reason: str
     verdict: int = Field(description="1 if directly inferable from context, 0 otherwise")
 
+class NLIJudgementOutput(BaseModel):
+    judgements: List[StatementJudgement] = Field(description="List of individual statement judgements")
+
 class FaithfulnessVerdict(BaseModel):
     judgements: List[StatementJudgement]
     anclaje_fuente_score: float
@@ -169,6 +174,7 @@ Statements to judge:
 def compute_anclaje_fuente_score(generated_text: str, context_chunks: List[str], llm_callable) -> FaithfulnessVerdict:
     """
     Computes anclaje_fuente_score (0.0 to 1.0) using Ragas methodology.
+    Compatible with standard LLM structured output calls (BaseModel container).
     """
     combined_context = "\n---\n".join(context_chunks)
     
@@ -181,20 +187,21 @@ def compute_anclaje_fuente_score(generated_text: str, context_chunks: List[str],
     if not statements_resp.statements:
         return FaithfulnessVerdict(judgements=[], anclaje_fuente_score=1.0)
 
-    # Step 2: Judge each statement against context
-    judgements_resp = llm_callable(
+    # Step 2: Judge each statement against context using BaseModel container
+    judgements_resp: NLIJudgementOutput = llm_callable(
         NLI_EVALUATION_PROMPT.format(
             context=combined_context,
             statements="\n".join(f"- {s}" for s in statements_resp.statements)
         ),
-        response_model=List[StatementJudgement]
+        response_model=NLIJudgementOutput
     )
     
-    total = len(judgements_resp)
-    supported = sum(1 for j in judgements_resp if j.verdict == 1)
+    judgements = judgements_resp.judgements if hasattr(judgements_resp, "judgements") else judgements_resp
+    total = len(judgements)
+    supported = sum(1 for j in judgements if j.verdict == 1)
     score = round(supported / total, 3) if total > 0 else 1.0
     
-    return FaithfulnessVerdict(judgements=judgements_resp, anclaje_fuente_score=score)
+    return FaithfulnessVerdict(judgements=judgements, anclaje_fuente_score=score)
 ```
 
 ---

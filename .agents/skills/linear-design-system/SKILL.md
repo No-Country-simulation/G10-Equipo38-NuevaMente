@@ -239,27 +239,145 @@ def render_fidelity_score(score: float):
     """, unsafe_allow_html=True)
 ```
 
-### B. Interactive Quiz Card Component
-For real-time evaluation with immediate feedback and pedagogical explanations:
+### B. Interactive Quiz Card Component (Real-Time Evaluation)
 ```python
-def render_quiz_question(idx: int, question: str, options: list[str], correct_idx: int, justification: str):
+def render_quiz_question(idx: int, q_data: dict, user_selected: str = None):
     st.markdown(f"""
     <div class="linear-card">
-        <span class="linear-badge linear-badge-accent">Pregunta {idx + 1}</span>
-        <h4 style="margin: 0.6rem 0 1rem 0; color: #f7f8f8;">{question}</h4>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="linear-badge linear-badge-accent">Pregunta {idx + 1}</span>
+        </div>
+        <h4 style="margin: 0.6rem 0 1rem 0; color: #f7f8f8;">{q_data['question']}</h4>
     </div>
     """, unsafe_allow_html=True)
-    # Streamlit radio / buttons with styled outcome
+    
+    # Render feedback banner if answered
+    if user_selected:
+        is_correct = user_selected == q_data['correct_option_id']
+        cls = "linear-badge-success" if is_correct else "linear-badge-warning"
+        status_text = "✅ ¡Correcto!" if is_correct else f"❌ Incorrecto (Opción correcta: {q_data['correct_option_id']})"
+        st.markdown(f"""
+        <div class="linear-card" style="border-left: 4px solid {'#27a644' if is_correct else '#ef4444'};">
+            <span class="linear-badge {cls}">{status_text}</span>
+            <p style="margin-top: 0.5rem; color: #d0d6e0; font-size: 0.9rem;">{q_data['explanation']}</p>
+        </div>
+        """, unsafe_allow_html=True)
 ```
 
-### C. OCI Always Free Badge
+### C. Flashcard Flip & Study Deck Component
+```python
+def render_flashcard(card_idx: int, total: int, front: str, back: str, tags: list[str]):
+    tags_html = " ".join([f'<span class="linear-badge" style="font-size:0.7rem;">#{t}</span>' for t in tags])
+    st.markdown(f"""
+    <div class="flashcard">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+            <span class="linear-badge linear-badge-accent">Tarjeta {card_idx}/{total}</span>
+            <div>{tags_html}</div>
+        </div>
+        <div class="flashcard-q">{front}</div>
+        <details style="margin-top: 0.75rem; cursor: pointer;">
+            <summary style="color: #828fff; font-size: 0.85rem; font-weight: 500;">👁️ Ver Respuesta / Reverso</summary>
+            <div class="flashcard-a" style="margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #23252a;">
+                {back}
+            </div>
+        </details>
+    </div>
+    """, unsafe_allow_html=True)
+```
+
+### D. Step-by-Step Tutorial Step Card
+```python
+def render_tutorial_step(step_number: int, title: str, instruction: str, code: str = None, expected: str = "", check: str = ""):
+    code_html = f'<pre style="background:#010102; border:1px solid #23252a; padding:0.8rem; border-radius:6px; color:#f7f8f8; font-family:JetBrains Mono;"><code>{code}</code></pre>' if code else ''
+    st.markdown(f"""
+    <div class="linear-card">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <span class="linear-badge linear-badge-accent">Paso {step_number}</span>
+            <strong style="color: #f7f8f8;">{title}</strong>
+        </div>
+        <p style="color: #d0d6e0; margin-bottom: 0.75rem;">{instruction}</p>
+        {code_html}
+        <div style="background:#141516; padding:0.6rem 0.8rem; border-radius:6px; border-left:3px solid #5e6ad2; margin-top:0.5rem;">
+            <div style="font-size:0.8rem; color:#8a8f98;">Resultado Esperado: <span style="color:#f7f8f8;">{expected}</span></div>
+            <div style="font-size:0.8rem; color:#8a8f98;">Verificación: <span style="color:#27a644;">{check}</span></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+```
+
+### E. Executive Summary (TL;DR) Card
+```python
+def render_executive_summary(title: str, bullets: list[str], business_impact: str, implications: str, actions: list[str]):
+    bullets_html = "".join([f"<li style='margin-bottom:0.4rem;'>{b}</li>" for b in bullets])
+    actions_html = "".join([f"<li style='margin-bottom:0.3rem;'>{a}</li>" for a in actions])
+    st.markdown(f"""
+    <div class="linear-card">
+        <span class="linear-badge linear-badge-accent">Resumen Ejecutivo · TL;DR</span>
+        <h3 style="margin:0.5rem 0 1rem 0; color:#f7f8f8;">{title}</h3>
+        <ul style="color:#d0d6e0; padding-left:1.2rem;">{bullets_html}</ul>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem;">
+            <div style="background:#141516; padding:0.8rem; border-radius:6px; border:1px solid #23252a;">
+                <span class="linear-badge" style="color:#38bdf8; border-color:#38bdf8;">Impacto en Negocio</span>
+                <p style="font-size:0.85rem; color:#d0d6e0; margin-top:0.4rem;">{business_impact}</p>
+            </div>
+            <div style="background:#141516; padding:0.8rem; border-radius:6px; border:1px solid #23252a;">
+                <span class="linear-badge" style="color:#828fff; border-color:#5e6ad2;">Implicaciones Arquitectónicas</span>
+                <p style="font-size:0.85rem; color:#d0d6e0; margin-top:0.4rem;">{implications}</p>
+            </div>
+        </div>
+        <div style="margin-top:1rem;">
+            <span style="font-size:0.85rem; font-weight:600; color:#f7f8f8;">Acciones Recomendadas:</span>
+            <ol style="color:#d0d6e0; padding-left:1.2rem; font-size:0.85rem; margin-top:0.3rem;">{actions_html}</ol>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+```
+
+### F. Video / Class Script Scene Card
+```python
+def render_script_scene(scene_number: int, duration_min: float, scene_title: str, narration: str, slides: list[str], check_q: str = None):
+    slides_html = "".join([f"<li>{s}</li>" for s in slides])
+    check_html = f'<div style="margin-top:0.5rem; background:rgba(94,106,210,0.1); border:1px solid #5e6ad2; border-radius:6px; padding:0.5rem 0.8rem; font-size:0.85rem;"><strong>Pregunta Interactiva al Alumnado:</strong> {check_q}</div>' if check_q else ''
+    st.markdown(f"""
+    <div class="linear-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+            <span class="linear-badge linear-badge-accent">Escena {scene_number} ({duration_min} min)</span>
+            <span style="color:#8a8f98; font-size:0.8rem;">Guion Docente</span>
+        </div>
+        <h4 style="color:#f7f8f8; margin:0 0 0.5rem 0;">{scene_title}</h4>
+        <div style="background:#141516; border-left:3px solid #828fff; padding:0.8rem; border-radius:6px; margin-bottom:0.75rem;">
+            <span style="font-size:0.75rem; text-transform:uppercase; color:#8a8f98; letter-spacing:0.05em;">Narración del Instructor:</span>
+            <p style="color:#f7f8f8; font-size:0.92rem; margin:0.3rem 0 0 0; font-style:italic;">"{narration}"</p>
+        </div>
+        <div style="font-size:0.82rem; color:#8a8f98;">Puntos Clave Diapositiva:</div>
+        <ul style="color:#d0d6e0; font-size:0.85rem; padding-left:1.2rem; margin:0.3rem 0 0.5rem 0;">{slides_html}</ul>
+        {check_html}
+    </div>
+    """, unsafe_allow_html=True)
+```
+
+### G. OCI Always Free Badge
 Signals compliance with zero-cost OCI cloud storage:
 ```python
-st.markdown("""
-<div class="linear-badge" style="border-color: #38bdf8; color: #38bdf8; margin-bottom: 0.5rem;">
-    ☁️ OCI Object Storage Always Free ($0.00) · Bucket: nuevamente-contenidos-educativos
-</div>
-""", unsafe_allow_html=True)
+def render_oci_badge(bucket: str = "nuevamente-contenidos-educativos"):
+    st.markdown(f"""
+    <div class="linear-badge" style="border-color: #38bdf8; color: #38bdf8; margin-bottom: 0.5rem;">
+        ☁️ OCI Object Storage Always Free ($0.00) · Bucket: {bucket}
+    </div>
+    """, unsafe_allow_html=True)
+```
+
+### H. Devicon CDN Helper for Tech Stack Badges
+Adapted from `devicon` library for crisp dark-mode developer badges:
+```python
+def render_tech_badge(tech_name: str, devicon_class: str):
+    """Renders a tech stack badge using Devicon CDN."""
+    st.markdown(f"""
+    <span class="linear-badge" style="gap: 0.4rem;">
+        <i class="{devicon_class}" style="font-size: 1rem;"></i>
+        <span>{tech_name}</span>
+    </span>
+    """, unsafe_allow_html=True)
 ```
 
 ---

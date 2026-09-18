@@ -64,6 +64,7 @@ All outputs are validated against strict **Pydantic schemas** and support multi-
 
 ```python
 from enum import Enum
+from pathlib import Path
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -85,9 +86,14 @@ class IndustryNiche(str, Enum):
     HEALTHCARE = "Salud"
     ECOMMERCE = "E-commerce"
     GENERAL = "General"
+
+class DetailLevel(str, Enum):
+    DIDACTIC = "Didáctico / Conceptual"
+    PRACTICAL = "Práctico / Orientado a Código"
+    DEEP_DIVE = "Técnico Profundo / Arquitectura"
 ```
 
-### 1. Flashcards Schema & Anki Helper
+### 1. Flashcards Schema & Anki Helpers (.apkg & CSV/TSV)
 
 ```python
 class Flashcard(BaseModel):
@@ -107,6 +113,39 @@ def export_flashcards_to_anki_csv(deck: FlashcardDeck) -> str:
         tags_str = " ".join(card.tags)
         lines.append(f"{card.front}\t{card.back}\t{tags_str}")
     return "\n".join(lines)
+
+def export_flashcards_to_apkg(deck: FlashcardDeck, output_path: str | Path) -> Path:
+    """
+    Exports FlashcardDeck to native Anki .apkg binary using genanki.
+    Falls back gracefully to standard TSV if genanki is not installed.
+    """
+    out = Path(output_path)
+    try:
+        import genanki
+        model_id = 1607392319
+        deck_id = 2059392319
+        my_model = genanki.Model(
+            model_id,
+            'NuevaMente Flashcard Model',
+            fields=[{'name': 'Question'}, {'name': 'Answer'}],
+            templates=[{
+                'name': 'Card 1',
+                'qfmt': '{{Question}}',
+                'afmt': '{{FrontSide}}<hr id="answer">{{Answer}}',
+            }],
+            css=".card { font-family: -apple-system, sans-serif; font-size: 18px; text-align: center; color: #f7f8f8; background-color: #0f1011; padding: 20px; }"
+        )
+        my_deck = genanki.Deck(deck_id, deck.deck_name)
+        for card in deck.cards:
+            my_note = genanki.Note(model=my_model, fields=[card.front, card.back], tags=card.tags)
+            my_deck.add_note(my_note)
+        genanki.Package(my_deck).write_to_file(str(out))
+        return out
+    except ImportError:
+        tsv_path = out.with_suffix(".tsv")
+        tsv_content = export_flashcards_to_anki_csv(deck)
+        tsv_path.write_text(tsv_content, encoding="utf-8")
+        return tsv_path
 ```
 
 ### 2. Quiz Interactivo Schema
@@ -122,7 +161,7 @@ class QuizQuestion(BaseModel):
     options: List[QuizOption]
     correct_option_id: str = Field(description="The correct option_id (e.g. 'B')")
     explanation: str = Field(description="Detailed pedagogical justification of why the correct option is right and why others are wrong.")
-    source_chunk_reference: Optional[str] = Field(description="Quote or chunk ID from source document")
+    source_chunk_reference: Optional[str] = Field(default=None, description="Quote or chunk ID from source document")
 
 class InteractiveQuiz(BaseModel):
     quiz_title: str
@@ -160,7 +199,27 @@ class ExecutiveSummary(BaseModel):
     recommended_actions: List[str]
 ```
 
-### 5. Unified Pedagogical Output Wrapper
+### 5. Guion de Clase / Video Schema
+
+```python
+class ScriptScene(BaseModel):
+    scene_number: int
+    duration_minutes: float
+    scene_title: str
+    instructor_narration: str = Field(description="Verbatim script spoken by instructor or presenter")
+    slide_bullet_points: List[str] = Field(description="Text displayed on accompanying slide")
+    interactive_check_question: Optional[str] = Field(default=None, description="Check-for-understanding question for audience")
+
+class VideoLessonScript(BaseModel):
+    title: str
+    target_audience: RecipientProfile
+    total_estimated_duration_minutes: float
+    learning_objectives: List[str]
+    scenes: List[ScriptScene]
+    closing_takeaway: str
+```
+
+### 6. Unified Pedagogical Output Wrapper
 
 ```python
 class PedagogicalOutput(BaseModel):
@@ -168,6 +227,7 @@ class PedagogicalOutput(BaseModel):
     recipient_profile: RecipientProfile
     pedagogical_format: PedagogicalFormat
     niche: IndustryNiche
+    detail_level: DetailLevel = DetailLevel.DIDACTIC
     anclaje_fuente_score: float = Field(ge=0.0, le=1.0)
     source_document: str
     content_json: dict = Field(description="Serialized payload corresponding to the specific format schema")

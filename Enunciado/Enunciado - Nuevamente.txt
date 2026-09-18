@@ -1,0 +1,248 @@
+--- Página 1 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+Proyecto 1 – 🎓 NuevaMente – Sistema Inteligente 
+de Adaptación y Generación de Contenido 
+Educativo 
+Mapeo de Formaciones ONE (Grupo 10) 
+• Formaciones Indispensables: Inteligencia de Datos y RAG Avanzado y Oracle Cloud Infrastructure 
+(OCI). 
+• Formaciones de Refuerzo: Ingeniería de Agentes y Automatización con IA y Desarrollo y 
+Orquestación con IA Generativa. 
+• Núcleo Técnico: Pipeline de RAG (Retrieval-Augmented Generation) con segmentación 
+(chunking), generación de embeddings y búsqueda vectorial en Vector Store para anclar el 
+contenido didáctico con fidelidad en las fuentes técnicas originales, integrado a OCI Object 
+Storage en la capa Always Free. 
+Sector empresarial 
+EdTech / Capacitación Corporativa / Plataformas de Educación Técnica — Aplicaciones y servicios 
+orientados a la democratización y aceleración del aprendizaje técnico. El sector atiende a instituciones 
+educativas, empresas de tecnología y equipos de ingeniería que necesitan capacitar a públicos diversos 
+(desde principiantes en transición de carrera hasta líderes técnicos y arquitectos) a partir de 
+documentaciones, manuales y materiales técnicos densos y en constante evolución. 
+Descripción del proyecto 
+Crear una solución inteligente capaz de ingerir documentaciones técnicas, manuales de software, 
+artículos o bases de conocimiento y transformarlos automáticamente en contenidos educativos 
+personalizados y estructurados según el perfil del destinatario, la industria de aplicación y el formato 
+pedagógico de salida elegido. 
+Hoy en día, la creación y adaptación manual de materiales didácticos a partir de documentaciones 
+complejas es un proceso lento que consume semanas de trabajo de especialistas y diseñadores 
+instruccionales. La solución NuevaMente debe utilizar técnicas de IA Generativa, RAG (Retrieval-
+Augmented Generation) y Orquestación de Agentes para automatizar este flujo, garantizando 
+fidelidad técnica (anclaje en las fuentes originales) y adecuación pedagógica. 
+La aplicación debe recibir materiales técnicos en los formatos soportados (archivos PDF, Markdown o 
+texto sin formato) y permitir la parametrización de los siguientes criterios: 
+• Perfil del Destinatario: ej.: Principiante / Transición de Carrera, Desarrollador Junior / Semi Senior, 
+Líder Técnico / Arquitecto, Gestor / Ejecutivo (No Técnico). 
+
+--- Página 2 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+• Formato Pedagógico de Salida: ej.: Guía Práctica Paso a Paso (Tutorial), Flashcards de 
+Memorización, Quiz Interactivo con Justificaciones, Resumen Ejecutivo (TL;DR), Guion de Clase / Video. 
+• Nicho / Contexto de Aplicación: ej.: Fintech, Salud, E-commerce, General. 
+La inteligencia de la aplicación deberá: 
+1. Extraer e indexar el contenido técnico utilizando técnicas de RAG (con segmentación en chunks y 
+embeddings vectoriales) para fundamentar las respuestas; 
+2. Orquestar un flujo de agentes o cadenas de prompts utilizando LLMs a elección del equipo 
+(Google Gemini, OpenAI ChatGPT/GPT-4o, Anthropic Claude, Grok, Ollama o equivalentes) para 
+reescribir, ejemplificar y estructurar el contenido en el nivel de profundidad y tono adecuados; 
+3. Evaluar la coherencia didáctica y generar metadatos de aprendizaje (conceptos clave, 
+prerrequisitos, tiempo estimado de estudio). 
+Los resultados deberán ponerse a disposición en formato JSON estructurado para su integración con 
+sistemas externos, acompañados de una interfaz interactiva (ej.: Streamlit o Gradio). La persistencia de 
+los documentos y de los paquetes de contenido generados debe utilizar obligatoriamente OCI Object 
+Storage dentro de la capa Always Free de OCI. 
+Necesidad del cliente (explicación no técnica) 
+Las empresas y escuelas de tecnología producen documentaciones técnicas muy ricas, pero a menudo 
+inaccesibles para quienes no dominan la jerga técnica avanzada. Un mismo manual de infraestructura 
+en la nube necesita enseñarse de maneras muy distintas a quien está dando sus primeros pasos en 
+programación y a quien tomará decisiones ejecutivas de inversión. 
+La solución debe permitir: 
+• Ingerir documentos técnicos densos sin necesidad de preprocesamiento manual; 
+• Personalizar el lenguaje y la didáctica instantáneamente para diferentes audiencias; 
+• Generar múltiples formatos de estudio (quizzes, flashcards, tutoriales, resúmenes) con unos pocos 
+clics; 
+• Garantizar confiabilidad, asegurando que los contenidos generados no alucinen y reflejen 
+fielmente el material original; 
+• Reducir el tiempo de producción de contenido de semanas a minutos. 
+Validación de mercado 
+El mercado global de EdTech y Capacitación Corporativa impulsado por IA Generativa experimenta 
+una fuerte expansión: 
+• La demanda de capacitación continua (upskilling y reskilling) exige que nuevos cursos y 
+entrenamientos se lancen a la misma velocidad que las actualizaciones de software. 
+• Las metodologías tradicionales de desarrollo de contenidos enfrentan cuellos de botella de tiempo 
+y altos costos con consultores especializados. 
+
+--- Página 3 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+• Las soluciones que combinan RAG y agentes orquestados ofrecen el equilibrio ideal entre 
+velocidad de producción y rigor técnico, permitiendo que plataformas educativas y empresas 
+personalicen la enseñanza a escala. 
+Objetivo del Hackathon 
+Desarrollar un MVP (Producto Mínimo Viable) funcional capaz de: 
+1. Ingerir y procesar documentos técnicos de entrada (archivos PDF, Markdown o texto); 
+2. Implementar una pipeline de RAG con generación y búsqueda de embeddings para anclar las 
+respuestas en la documentación provista; 
+3. Orquestar prompts y flujos inteligentes utilizando LLMs (Google Gemini, OpenAI, Claude u otros 
+modelos vía API/local) para adaptar el contenido al perfil y formato solicitados; 
+4. Generar salidas en formato estructurado (JSON) que contengan el contenido adaptado, términos 
+clave y evaluación pedagógica; 
+5. Disponer de una interfaz amigable (Streamlit / Gradio) o API REST funcional; 
+6. Integrar la solución obligatoriamente con OCI Object Storage (capa Always Free) para almacenar 
+los documentos y los contenidos generados. 
+Resultados esperados 
+1. IA Generativa, RAG & Agentes 
+Notebook o módulos que contengan: 
+• Ingestión y extracción de texto de documentos técnicos (ej.: biblioteca PyPDF o lectores Markdown); 
+• Pipeline de RAG: segmentación del texto (chunking), generación de embeddings y almacenamiento 
+en Vector Store (ej.: Chroma, FAISS o similar); 
+• Creación y optimización de prompts estructurados con técnicas de few-shot y role prompting; 
+• Cadena de orquestación (LangChain) o Grafo de Decisión (LangGraph) para planificar, redactar y 
+revisar el contenido generado; 
+• Mecanismo de verificación de fidelidad al documento de origen para mitigar alucinaciones. 
+2. Back-End, Automatización & Interfaz 
+Aplicación funcional (Streamlit, Gradio, FastAPI, Flask o equivalente) que contenga: 
+• Endpoint o interfaz para cargar el documento técnico y seleccionar los parámetros (perfil, formato, 
+nicho); 
+• Orquestación del flujo de generación; 
+• Validación de esquemas de entrada y salida con tipado estricto; 
+• Manejo de excepciones y mensajes de error amigables. 
+
+--- Página 4 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+3. Oracle Cloud Infrastructure (OCI) — Capa Always Free 
+• Requisito Obligatorio (MVP): OCI Object Storage — Creación de Bucket Always Free para 
+persistir los documentos técnicos originales enviados y los archivos JSON de contenido educativo 
+adaptado generados por el sistema; 
+• Recurso Opcional / Diferencial: OCI Compute Instance ("Despliegue Completo en la Nube") — 
+Alojamiento de la aplicación (Streamlit/Gradio o API) en una máquina virtual Always Free en OCI; 
+• Aviso Importante ONE: Dado que el programa ONE es una iniciativa social 100% gratuita para los 
+estudiantes, se debe utilizar estrictamente la capa Always Free de OCI, evitando configuraciones 
+que puedan generar costos monetarios. 
+4. Documentación & Demostración 
+• Repositorio Git estructurado con commits claros y colaborativos; 
+• Archivo README.md detallado con la arquitectura de la solución, diagrama del flujo RAG/Agentes y 
+guía de instalación; 
+• Demostración práctica presentando al menos tres escenarios distintos de adaptación para un 
+mismo documento técnico. 
+Funcionalidades obligatorias (MVP) 
+Endpoint / Acción Principal: Adaptación de Contenido Educativo 
+La aplicación debe exponer una interfaz o endpoint capaz de recibir el material técnico y los parámetros 
+de personalización, procesarlo mediante la pipeline RAG + LLM y retornar el paquete educativo 
+completo. 
+Ejemplo de Solicitud (Entrada): 
+{ 
+  "documento_titulo": "Introduccion a la Arquitectura de Redes VCN en OCI", 
+  "documento_contenido": "La Virtual Cloud Network (VCN) es una red privada y personalizable 
+configurada en Oracle Cloud Infrastructure. Similar a una red de centro de datos tradicional, 
+la VCN ofrece control total sobre su entorno de red, incluyendo subredes publicas y privadas, 
+tablas de enrutamiento, Internet Gateways, NAT Gateways y Security Lists para control de 
+trafico mediante reglas de entrada (ingress) y salida (egress).", 
+  "perfil_destinatario": "Principiante", 
+  "formato_salida": "Flashcards", 
+  "nicho_sector": "General", 
+  "nivel_detalle": "Didactico" 
+} 
+ 
+Ejemplo de Respuesta (Salida Estructurada): 
+{ 
+  "status": "exito", 
+  "metadatos": { 
+
+--- Página 5 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+    "perfil_aplicado": "Principiante", 
+    "formato_generado": "Flashcards", 
+    "tiempo_estimado_estudio_minutos": 5, 
+    "conceptos_clave": ["VCN", "Subredes", "Internet Gateway", "Security Lists"] 
+  }, 
+  "contenido_adaptado": { 
+    "titulo": "Dominando Redes en la Nube (VCN) desde Cero", 
+    "introduccion_contextualizada": "Imagina la VCN como tu propio barrio privado y seguro 
+dentro de la nube de Oracle, donde tu decides quien entra y quien sale.", 
+    "items": [ 
+      { 
+        "frente": "Que es una VCN en Oracle Cloud?", 
+        "dorso": "Es tu red virtual privada y personalizada dentro de la nube de Oracle, 
+funcionando como la infraestructura de red de tu empresa.", 
+        "pista_didactica": "Piensa en ella como el terreno cercado donde residen tus 
+servidores." 
+      }, 
+      { 
+        "frente": "Para que sirven las Security Lists (Listas de Seguridad)?", 
+        "dorso": "Son como guardias virtuales con listas de reglas que definen exactamente 
+que tipo de trafico de datos puede entrar o salir de tu red.", 
+        "pista_didactica": "Reglas de entrada (ingress) y reglas de salida (egress)." 
+      } 
+    ] 
+  }, 
+  "evaluacion_calidad": { 
+    "anclaje_fuente_score": 0.98, 
+    "claridad_pedagogica": "Alta", 
+    "observaciones": "Lenguaje ajustado con analogias para publico principiante, sin 
+tecnicismos excesivos." 
+  }, 
+  "almacenamiento_oci": { 
+    "bucket": "nuevamente-contenidos-educativos", 
+    "objeto_id": "contenido-vcn-principiante-flashcards-001.json", 
+    "status_upload": "completado" 
+  } 
+} 
+ 
+Requisitos mínimos (Checklist de Evaluación) 
+• ☐  Ingestión funcional de documentos técnicos (PDF, Markdown o texto); 
+• ☐  Implementación de RAG con segmentación (chunking), embeddings y búsqueda vectorial en 
+Vector Store; 
+• ☐  Orquestación con LLM (Google Gemini, OpenAI ChatGPT, Anthropic Claude o modelo open-
+source equivalente); 
+• ☐  Capacidad comprobada de adaptar el mismo contenido para al menos 2 perfiles diferentes (ej.: 
+Principiante vs Avanzado) y 2 formatos distintos (ej.: Tutorial vs Flashcards/Quiz); 
+• ☐  Salida de datos estructurada en JSON e interfaz interactiva (Streamlit o Gradio) o API REST 
+operativa; 
+
+--- Página 6 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+• ☐  Integración activa y funcional con OCI Object Storage (capa Always Free) para la persistencia de 
+archivos; 
+• ☐  Presentación de un mínimo de 3 ejemplos de ejecución con documentaciones reales o 
+simuladas; 
+• ☐  Documentación completa en el repositorio GitHub con diagrama de arquitectura. 
+Recursos opcionales (Diferenciales) 
+• Despliegue Completo en la Nube (OCI Compute): Alojamiento de la aplicación en una instancia 
+VM Linux en la capa Always Free de OCI; 
+• Sistema Multi-Agente con LangGraph: Enrutador con Agente Investigador RAG, Agente Redactor 
+Pedagógico y Agente Crítico/Revisor; 
+• Generación de Quizzes con Evaluación en Tiempo Real: Interfaz donde el estudiante responde 
+preguntas generadas y recibe retroalimentación explicativa inmediata; 
+• Soporte Multimodal: Interpretación de diagramas técnicos contenidos en el documento original; 
+• Exportación Multiformato: Descarga directa en Markdown, PDF didáctico formateado o CSV 
+compatible con Anki. 
+Directrices técnicas para los estudiantes 
+IA Generativa & RAG 
+• Modelos de Lenguaje: Los equipos pueden utilizar Google Gemini, OpenAI (ChatGPT / GPT-4o), 
+Anthropic (Claude), Grok, Ollama o cualquier otra LLM de su preferencia (Gemini es la referencia 
+trabajada en clase, pero no hay exclusividad obligatoria); 
+• RAG & Embeddings: Se recomienda Python con LangChain para la orquestación de la pipeline de 
+RAG, PyPDF para la lectura de archivos y Vector Stores como ChromaDB o FAISS (también se 
+aceptan soluciones y frameworks equivalentes); 
+• Estructuración de Salidas: Utilice parsers tipados (Pydantic / Structured Outputs) para asegurar el 
+formato JSON correcto. 
+Interfaz & Automatización 
+• Interfaz Sugerida: Streamlit o Gradio para la carga de archivos y visualización de los resultados 
+generados; 
+• Flexibilidad de Stack: Python, Node.js, FastAPI, Flask o n8n son opciones válidas para el 
+backend/automatización. 
+Oracle Cloud Infrastructure (OCI) 
+• Object Storage (Obligatorio): Almacene los archivos originales y los artefactos educativos 
+generados en un Bucket Always Free mediante OCI SDK para Python (oci-sdk), SDKs equivalentes o 
+llamadas REST; 
+
+--- Página 7 ---
+Programa ONE · Grupo 10 | Sistema Inteligente de Adaptac... 
+Hackathon ONE G10 — Oracle Next Education & Alura 
+• Atención a los Costos: Utilice exclusivamente servicios de la capa Always Free para garantizar el 
+cumplimiento con la gratuidad del programa ONE. 
