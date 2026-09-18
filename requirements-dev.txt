@@ -24,5 +24,10 @@ pytest==9.1.1
 # Es herramienta de documentacion, no dependencia de los servicios en runtime.
 reportlab==5.0.1
 
+# httpx (issue #07): dependencia de fastapi.testclient.TestClient. Sin ella, la
+# importacion del modulo explota en entornos limpios como la CI (starlette exige
+# httpx2 o httpx para el test client; usamos httpx, tambien fijado en el PR #72).
+httpx==0.28.1
+
 # Plugins de pytest (cobertura, async, etc.): se anadiran con version exacta
 # en el momento en que los tests de cada issue los necesiten — no antes.
