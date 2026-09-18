@@ -1,0 +1,142 @@
+# =============================================================================
+# Pipeline de Integración Continua (CI) del proyecto NuevaMente
+# Issue #02 · Fase 0 · Referencia: decisiones_proyecto.md §12.3
+#
+# ¿Qué hace este archivo? GitHub lee automáticamente los YAML que viven en
+# .github/workflows/ y ejecuta los "jobs" (tareas) descriptos aquí en máquinas
+# virtuales efímeras que GitHub provee sin costo para repos públicos.
+#
+# Este pipeline hace 4 cosas, siempre con las dependencias EXACTAS del repo:
+#   1. Verifica que los requirements*.txt solo tengan versiones fijadas (==).
+#   2. ruff check          -> detecta errores de lint en el código Python.
+#   3. ruff format --check -> verifica que el formato sea el oficial del repo.
+#   4. pytest              -> corre la suite de tests desde la raíz.
+#
+# Reglas del equipo que este archivo materializa (docs/guia-trabajo-equipo.md):
+#   - "CI verde" es requisito del Definition of Done para mergear (§4).
+#   - Las pruebas ordinarias corren con MOCK_OCI=1: jamás tocan servicios
+#     reales de Oracle Cloud ni consumen cuota.
+#   - Las integraciones reales (OCI y Gemini verdaderos) corren APARTE con
+#     credenciales seguras, nunca en PRs ordinarios (eso llega con el #54).
+# =============================================================================
+
+# Nombre visible de la ejecución en la pestaña "Actions" y en el badge del README.
+name: CI
+
+# -----------------------------------------------------------------------------
+# ¿CUÁNDO corre? ("triggers")
+#   - pull_request hacia develop: cada PR que el equipo abre para integrar
+#     su trabajo. Es lo que hace que "un PR que rompe lint quede bloqueado".
+#   - push a develop y main: confirma que lo recién mergeado sigue sano;
+#     develop es la rama de integración y main la de producción (§13.2).
+# -----------------------------------------------------------------------------
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop, main]
+
+# Permisos mínimos del token del workflow (principio de menor privilegio):
+# esta CI solo necesita leer el código. Criterio del issue #02: ningún
+# secreto real en el workflow — y de hecho no usa secretos en absoluto.
+permissions:
+  contents: read
+
+# Si llegan varios pushes seguidos a la misma rama, cancela la ejecución ya
+# obsoleta y deja solo la última: ahorra minutos de CI y tiempo de espera.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Identificador del job. "name" es lo que se ve como check en los PRs;
+  # es el nombre que develop exige como status check obligatorio.
+  calidad:
+    name: calidad
+    # Máquina Linux x86_64 estándar que GitHub provee (gratis en repos
+    # públicos). Ojo (§12.3): probar en Linux x86 no acredita instalación
+    # en ARM64, la arquitectura de la VM Oracle del despliegue (issue #47).
+    runs-on: ubuntu-latest
+
+    # Techo de duración: si algo se cuelga, el job muere a los 10 minutos
+    # en vez de quemar minutos de CI. El objetivo del issue es < 5 min.
+    timeout-minutes: 10
+
+    # "matrix" = ejecutar la MISMA receta una vez por combinación de valores.
+    # Hoy una sola: Python 3.11, el target del proyecto (§12.3). Mañana,
+    # probar otra versión es agregar un elemento a esta lista, nada más.
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    # Variables de entorno disponibles para TODOS los pasos del job.
+    # §12.3: "Las pruebas ordinarias usan MOCK_OCI=1 y simulación explícita
+    # de Gemini". El doble de Gemini se implementa recién en el issue #10;
+    # desde ya la CI publica MOCK_GEMINI=1 para que ese issue no tenga que
+    # tocar este archivo cuando llegue.
+    env:
+      MOCK_OCI: "1"                    # StorageProvider -> mock local (issue #04).
+      MOCK_GEMINI: "1"                 # Doble de Gemini para tests (issue #10).
+      APP_ENV: "ci"                    # Entorno distinguible: ni production ni dev local.
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"  # Silencia el aviso "hay pip nuevo".
+      PYTHONDONTWRITEBYTECODE: "1"     # No deja archivos .pyc en el runner.
+
+    steps:
+      # Paso 1: descargar el código del commit que disparó el evento.
+      # "uses" reutiliza una acción mantenida por GitHub; todo job empieza así.
+      - name: Checkout del código
+        uses: actions/checkout@v5
+
+      # Paso 2: instalar el Python exacto de la matrix y activar la caché de
+      # pip. La caché guarda las ruedas descargadas entre ejecuciones y se
+      # invalida sola cuando cambia el hash de los archivos de requirements:
+      # dependencia nueva o versión cambiada -> caché nueva.
+      - name: Setup Python ${{ matrix.python-version }} con caché de pip
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            backend/requirements.txt
+            frontend/requirements.txt
+
+      # Pasos 3-5: instalación de dependencias SEPARADA por servicio (lo pide
+      # el issue). Ventaja: si mañana el backend necesita dependencias
+      # pesadas, el frontend no paga ese costo; y el paso que falla dice
+      # exactamente qué servicio tiene el problema.
+      - name: Instalar dependencias de desarrollo (ruff + pytest)
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Instalar dependencias del backend
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Instalar dependencias del frontend
+        run: python -m pip install -r frontend/requirements.txt
+
+      # Paso 6: política de versiones exactas (§12.3 y §14.3). El script
+      # revisa cada requirements y falla si aparece una dependencia sin
+      # "==" (rangos como >= hacen que la CI y producción instalen cosas
+      # distintas). Hoy los requirements están vacíos y debe pasar igual.
+      - name: Verificar versiones fijadas en requirements
+        run: python .github/scripts/check_pinned_requirements.py backend/requirements.txt frontend/requirements.txt requirements-dev.txt
+
+      # Paso 7: linter sobre todo el repo. La configuración vive en ruff.toml
+      # (120 columnas, py311, excluye documentación). `run:` ejecuta un
+      # comando de shell en el runner; si devuelve != 0, el paso y el job
+      # se marcan en rojo y el PR queda bloqueado.
+      - name: Linter (ruff check)
+        run: ruff check .
+
+      # Paso 8: verificar formato SIN modificar nada (--check). El formato
+      # oficial se aplica con `ruff format .` localmente antes de commitear.
+      - name: Formato (ruff format --check)
+        run: ruff format --check .
+
+      # Paso 9: la suite de tests, desde la raíz del repo tal como la guía
+      # manda. pytest.ini (raíz) define dónde buscar los tests y qué rutas
+      # de import agregar; el smoke test de backend/tests garantiza que
+      # siempre haya al menos un test (pytest devuelve exit 5 si no halla
+      # ninguno, y eso rompería la CI).
+      - name: Tests (pytest desde la raíz)
+        run: pytest
