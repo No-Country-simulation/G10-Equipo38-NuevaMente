@@ -1,0 +1,22 @@
+# Configuración de ruff (decisiones_proyecto.md §12.3):
+# - Ancho objetivo de línea: 120 caracteres.
+# - Target: Python 3.11 (la CI instala 3.11 y ejecuta `ruff check` y `ruff format --check`).
+line-length = 120
+target-version = "py311"
+
+# El lint/format aplica al código fuente del proyecto (backend/, frontend/).
+# Se excluyen documentación con bloques Python ilustrativos y material de referencia.
+extend-exclude = [
+    ".agents",
+    "docs",
+    "Enunciado",
+]
+
+[lint]
+# Reglas base seguras; la selección puede ampliarse por decisión explícita del equipo.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[format]
+# Consistente con line-length = 120 (ruff format).
+quote-style = "double"
+indent-style = "space"

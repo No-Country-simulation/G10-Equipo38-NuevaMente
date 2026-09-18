@@ -149,6 +149,36 @@ Inspirado en la interfaz de Linear (`awesome-design-md`):
 
 ---
 
+## ⚙️ Estructura del Repositorio y Ejecución
+
+Monorepo con dos servicios esqueleto (sección 15 de `decisiones_proyecto.md`): `backend/` (FastAPI, paquete `app`) y `frontend/` (Streamlit). Flujo Git: `main` protegida (solo PRs) ← `develop` (integración) ← `feature/<nombre>`.
+
+```bash
+# 1. Clonar y crear entorno virtual (Python 3.11)
+git clone https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente.git
+cd G10-Equipo38-NuevaMente
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# 2. Instalar dependencias fijadas (desde la raíz)
+pip install -r backend/requirements.txt -r frontend/requirements.txt
+
+# 3. Verificar el esqueleto del backend (paquete importable)
+cd backend && python -c "import app" && cd ..
+
+# 4. Variables de entorno: copiar template y completar placeholders (Apéndice A)
+cp .env.example .env
+
+# 5. Lint y formato (ruff, 120 cols, py311)
+ruff check .
+ruff format --check .
+
+# 6. Compose preliminar (esqueleto; endurecimiento con el issue #26)
+docker compose build
+```
+
+---
+
 ## 🤖 Catálogo de Skills para Agentes de IA
 
 El repositorio cuenta con 13 skills especializadas y armonizadas en `.agents/skills/`, gobernadas por el orquestador maestro [`AGENTS.md`](./AGENTS.md) y registradas en [`.agents/skills.json`](./.agents/skills.json):
