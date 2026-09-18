@@ -1,0 +1,4 @@
+# Política de dependencias del backend (decisiones_proyecto.md §12.3 y §14.3):
+# - Versiones exactas con "==" fijadas por cambio explícito; nunca rangos ni floating.
+# - Cada adición llega con su issue correspondiente y su verificación en CI.
+# - Sin dependencias aún: FastAPI/Uvicorn se añaden con el issue #07.
