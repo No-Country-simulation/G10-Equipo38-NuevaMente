@@ -64,9 +64,15 @@ def test_chunks_sinteticos_respetan_el_contrato_interno(chunks_sinteticos):
 
 
 def test_el_entorno_de_test_quedo_configurado():
-    """El conftest raíz fija los mocks ANTES de importar la aplicación."""
+    """El conftest raíz fija los mocks ANTES de importar la aplicación.
+
+    Sobre APP_ENV: el conftest usa setdefault a "test", que NO pisa un valor
+    preexistente — y la CI publica APP_ENV=ci desde el issue #02. Lo que
+    este test exige de verdad es que el entorno de suite NUNCA es
+    production (los mocks son obligatorios en toda corrida ordinaria).
+    """
     import os
 
     assert os.environ["MOCK_OCI"] == "1"
     assert os.environ["MOCK_GEMINI"] == "1"
-    assert os.environ["APP_ENV"] == "test"
+    assert os.environ["APP_ENV"] in ("test", "ci")  # local=test, CI=ci; jamas production
