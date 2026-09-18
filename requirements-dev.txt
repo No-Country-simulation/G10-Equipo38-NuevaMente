@@ -1,0 +1,24 @@
+# =============================================================================
+# Dependencias de DESARROLLO y CI (issue #02).
+#
+# Diferencia con backend/requirements.txt y frontend/requirements.txt: esos
+# dos archivos son lo que necesita cada SERVICIO para correr en producción;
+# este archivo es lo que necesita una PERSONA (o la CI) para desarrollar y
+# verificar: linter, formateador y runner de tests. Por eso vive en la raíz.
+#
+# Misma politica que el resto del repo (decisiones_proyecto.md 12.3/14.3):
+# versiones EXACTAS con "==" — la CI ademas lo verifica automaticamente con
+# .github/scripts/check_pinned_requirements.py. Actualizar una version es un
+# cambio deliberado, nunca un "pip install --upgrade" accidental.
+# =============================================================================
+
+# Linter y formateador. Su configuracion vive en ruff.toml (raiz):
+# 120 columnas, target py311, reglas E4/E7/E9/F/I.
+ruff==0.16.8
+
+# Runner de tests. Se ejecuta siempre desde la raiz del repo; pytest.ini
+# define donde estan los tests y que rutas de import agregar.
+pytest==9.1.1
+
+# Plugins de pytest (cobertura, async, etc.): se anadiran con version exacta
+# en el momento en que los tests de cada issue los necesiten — no antes.
