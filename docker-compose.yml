@@ -1,0 +1,27 @@
+# Compose preliminar (issue #01) — esquema conceptual de decisiones_proyecto.md §14.1.
+# El endurecimiento definitivo (usuario no-root, digest ARM64, healthchecks) llega con el issue #26.
+# Solo backend monta el volumen de datos; el frontend habla con backend por la red interna de Compose.
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - backend_data:/app/.data
+      - ./documents:/app/documents:ro
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8501:8501"
+    environment:
+      API_URL: http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_data:
