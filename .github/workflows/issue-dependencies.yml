@@ -1,0 +1,27 @@
+name: Dependency Status Bot
+
+on:
+  issues:
+    types: [opened, reopened, closed]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  update-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Dependency Status Checker
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/check_issue_dependencies.py

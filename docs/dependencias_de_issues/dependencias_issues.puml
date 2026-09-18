@@ -1,0 +1,318 @@
+@startuml
+title Diagrama de Dependencias PERT / CPM — NuevaMente (60 Issues, 167 Dependencias)
+
+top to bottom direction
+skinparam defaultFontName "Segoe UI", "Helvetica", Arial, sans-serif
+skinparam roundCorner 8
+skinparam shadowing false
+skinparam arrowColor #64748B
+skinparam arrowThickness 1.2
+skinparam packageBorderColor #94A3B8
+skinparam packageBackgroundColor #F8FAFC
+skinparam packageFontStyle bold
+skinparam packageFontColor #1E293B
+
+' ==========================================
+' ESTILOS SEMÁNTICOS POR CARRILES
+' ==========================================
+skinparam rectangle<<INF>> {
+    BackgroundColor #FEF3C7
+    BorderColor #D97706
+    FontColor #78350F
+}
+skinparam rectangle<<API>> {
+    BackgroundColor #D1FAE5
+    BorderColor #059669
+    FontColor #064E3B
+}
+skinparam rectangle<<RAG>> {
+    BackgroundColor #EDE9FE
+    BorderColor #7C3AED
+    FontColor #4C1D95
+}
+skinparam rectangle<<AGT>> {
+    BackgroundColor #E0E7FF
+    BorderColor #4F46E5
+    FontColor #312E81
+}
+skinparam rectangle<<UI>> {
+    BackgroundColor #CFFAFE
+    BorderColor #0891B2
+    FontColor #164E63
+}
+skinparam rectangle<<QAD>> {
+    BackgroundColor #FFE4E6
+    BorderColor #E11D48
+    FontColor #881337
+}
+
+' ==========================================
+' LEYENDA DEL GRAFO
+' ==========================================
+legend top left
+  <size:12><b>Convenciones del Diagrama PERT/CPM</b></size>
+  ----
+  <#FEF3C7,#D97706> <b>INF</b> : Infraestructura, DevOps & Cloud
+  <#D1FAE5,#059669> <b>API</b> : Backend FastAPI, Endpoints & DB
+  <#EDE9FE,#7C3AED> <b>RAG</b> : Ingestión, Chunking & ChromaDB
+  <#E0E7FF,#4F46E5> <b>AGT</b> : Multiagente LangGraph
+  <#CFFAFE,#0891B2> <b>UI</b>  : Frontend Streamlit & Componentes
+  <#FFE4E6,#E11D48> <b>QAD</b> : Calidad, E2E Tests & Documentación
+  ----
+  <color:#DC2626><b>━━━▶ Flecha Roja Gruesa</b></color> : Arista en Camino Crítico (Slack = 0)
+  <color:#64748B>───▶ Flecha Gris</color> : Dependencia Estándar con Holgura
+end legend
+
+package "Fase 0: Fundaciones y Contratos" as F0 {
+    rectangle "<b>#01</b> Inicializar monorepo y estructura de servicios 🔥\n<size:9>[INF · M | ES:0 LF:0]</size>" as I01 <<INF>>
+    rectangle "<b>#02</b> Pipeline CI con GitHub Actions 🔥\n<size:9>[INF · M | ES:1 LF:1]</size>" as I02 <<INF>>
+    rectangle "<b>#03</b> Contratos compartidos v1 🔥\n<size:9>[QAD · L | ES:1 LF:1]</size>" as I03 <<QAD>>
+    rectangle "<b>#04</b> Interfaz `StorageProvider` + proveedor mock explícito\n<size:9>[INF · M | ES:1 LF:3]</size>" as I04 <<INF>>
+    rectangle "<b>#05</b> Elaborar los 3 documentos demo\n<size:9>[QAD · M | ES:0 LF:1]</size>" as I05 <<QAD>>
+    rectangle "<b>#06</b> Catálogos i18n ES/EN/PT de la interfaz\n<size:9>[UI · M | ES:1 LF:7]</size>" as I06 <<UI>>
+}
+
+package "Fase 1: Núcleo de Datos y Acceso" as F1 {
+    rectangle "<b>#07</b> Esqueleto FastAPI: config validada, `/api/health`, errores estándar, `request_id`\n<size:9>[API · M | ES:2 LF:3]</size>" as I07 <<API>>
+    rectangle "<b>#08</b> Registro operativo SQLite\n<size:9>[API · L | ES:3 LF:4]</size>" as I08 <<API>>
+    rectangle "<b>#09</b> Workspaces anónimos, código de recuperación y sesiones\n<size:9>[API · L | ES:4 LF:5]</size>" as I09 <<API>>
+    rectangle "<b>#10</b> Infraestructura de tests: conftest, fixtures y doble de Gemini 🔥\n<size:9>[QAD · M | ES:2 LF:2]</size>" as I10 <<QAD>>
+    rectangle "<b>#11</b> Parser y validación de documentos 🔥\n<size:9>[RAG · L | ES:3 LF:3]</size>" as I11 <<RAG>>
+    rectangle "<b>#12</b> Chunker estructural con metadatos y `chunk_id` estable 🔥\n<size:9>[RAG · M | ES:4 LF:4]</size>" as I12 <<RAG>>
+    rectangle "<b>#13</b> Cliente de embeddings Gemini\n<size:9>[RAG · M | ES:3 LF:4]</size>" as I13 <<RAG>>
+    rectangle "<b>#14</b> Proveedor OCI Object Storage real\n<size:9>[INF · M | ES:2 LF:4]</size>" as I14 <<INF>>
+    rectangle "<b>#15</b> Esqueleto Streamlit con tema Linear\n<size:9>[UI · M | ES:2 LF:8]</size>" as I15 <<UI>>
+    rectangle "<b>#16</b> Cliente de API y gestión de sesión en el frontend\n<size:9>[UI · M | ES:5 LF:9]</size>" as I16 <<UI>>
+}
+
+package "Fase 2: Pipeline Vertical" as F2 {
+    rectangle "<b>#17</b> Vector store ChromaDB con aislamiento por espacio 🔥\n<size:9>[RAG · M | ES:5 LF:5]</size>" as I17 <<RAG>>
+    rectangle "<b>#18</b> Retriever MMR con presupuesto de evidencia 🔥\n<size:9>[RAG · M | ES:6 LF:6]</size>" as I18 <<RAG>>
+    rectangle "<b>#19</b> Endpoints de documentos 🔥\n<size:9>[API · L | ES:6 LF:6]</size>" as I19 <<API>>
+    rectangle "<b>#20</b> Gestor de trabajos: cola, estados, deadline y cancelación\n<size:9>[API · L | ES:4 LF:5]</size>" as I20 <<API>>
+    rectangle "<b>#21</b> Estado compartido del grafo y Supervisor\n<size:9>[AGT · M | ES:2 LF:4]</size>" as I21 <<AGT>>
+    rectangle "<b>#22</b> Biblioteca de prompts por perfil/formato/nicho/idioma\n<size:9>[AGT · L | ES:2 LF:4]</size>" as I22 <<AGT>>
+    rectangle "<b>#23</b> Writer con salida tipada y citas\n<size:9>[AGT · L | ES:3 LF:5]</size>" as I23 <<AGT>>
+    rectangle "<b>#24</b> Verificador de fidelidad (Faithfulness)\n<size:9>[AGT · L | ES:3 LF:5]</size>" as I24 <<AGT>>
+    rectangle "<b>#25</b> Flujo de carga de documentos en la UI\n<size:9>[UI · M | ES:7 LF:13]</size>" as I25 <<UI>>
+    rectangle "<b>#26</b> Contenedores Docker y docker-compose\n<size:9>[INF · M | ES:3 LF:11]</size>" as I26 <<INF>>
+}
+
+package "Fase 3: Multiagente y Fidelidad" as F3 {
+    rectangle "<b>#27</b> Researcher: consultas temáticas y cobertura 🔥\n<size:9>[AGT · M | ES:7 LF:7]</size>" as I27 <<AGT>>
+    rectangle "<b>#28</b> Critic: rúbrica pedagógica y política de aprobación\n<size:9>[AGT · L | ES:4 LF:6]</size>" as I28 <<AGT>>
+    rectangle "<b>#29</b> Grafo LangGraph completo con límite de 3 intentos 🔥\n<size:9>[AGT · L | ES:8 LF:8]</size>" as I29 <<AGT>>
+    rectangle "<b>#30</b> Ingestión multimodal de diagramas 🔥\n<size:9>[RAG · L | ES:7 LF:7]</size>" as I30 <<RAG>>
+    rectangle "<b>#31</b> Generación: `POST /api/generate`, SSE y ciclo de vida del trabajo 🔥\n<size:9>[API · L | ES:9 LF:9]</size>" as I31 <<API>>
+    rectangle "<b>#32</b> Panel de parámetros y disparo de generación 🔥\n<size:9>[UI · M | ES:10 LF:10]</size>" as I32 <<UI>>
+    rectangle "<b>#33</b> Progreso en vivo (SSE) en la UI\n<size:9>[UI · M | ES:11 LF:12]</size>" as I33 <<UI>>
+}
+
+package "Fase 4: Experiencia y Extras" as F4 {
+    rectangle "<b>#34</b> Renderizadores de los 5 formatos + panel de fuentes y calidad 🔥\n<size:9>[UI · L | ES:11 LF:11]</size>" as I34 <<UI>>
+    rectangle "<b>#35</b> Evaluación de quiz en tiempo real y eventos de progreso\n<size:9>[API · M | ES:10 LF:11]</size>" as I35 <<API>>
+    rectangle "<b>#36</b> Quiz interactivo con feedback inmediato\n<size:9>[UI · M | ES:12 LF:13]</size>" as I36 <<UI>>
+    rectangle "<b>#37</b> Chat RAG sobre el documento activo\n<size:9>[RAG · M | ES:9 LF:12]</size>" as I37 <<RAG>>
+    rectangle "<b>#38</b> Chat RAG en la UI\n<size:9>[UI · M | ES:12 LF:13]</size>" as I38 <<UI>>
+    rectangle "<b>#39</b> Glosario adaptado\n<size:9>[RAG · M | ES:9 LF:12]</size>" as I39 <<RAG>>
+    rectangle "<b>#40</b> Panel de glosario\n<size:9>[UI · S | ES:12 LF:13]</size>" as I40 <<UI>>
+    rectangle "<b>#41</b> Progreso de estudio\n<size:9>[UI · M | ES:12 LF:13]</size>" as I41 <<UI>>
+    rectangle "<b>#42</b> Historial, comparación y recuperación 🔥\n<size:9>[UI · M | ES:12 LF:12]</size>" as I42 <<UI>>
+    rectangle "<b>#43</b> Router de exportación + JSON y Markdown\n<size:9>[API · M | ES:10 LF:11]</size>" as I43 <<API>>
+    rectangle "<b>#44</b> PDF didáctico con ReportLab\n<size:9>[API · L | ES:11 LF:12]</size>" as I44 <<API>>
+    rectangle "<b>#45</b> CSV/TSV y APKG para flashcards\n<size:9>[API · M | ES:11 LF:12]</size>" as I45 <<API>>
+    rectangle "<b>#46</b> Descargas multiformato 🔥\n<size:9>[UI · S | ES:13 LF:13]</size>" as I46 <<UI>>
+}
+
+package "Fase 5: Despliegue y Endurecimiento" as F5 {
+    rectangle "<b>#47</b> Aprovisionar VM A1 Always Free (Ubuntu 24.04)\n<size:9>[INF · M | ES:0 LF:11]</size>" as I47 <<INF>>
+    rectangle "<b>#48</b> Proxy HTTPS con Caddy, DNS y SSE sin buffering\n<size:9>[INF · M | ES:10 LF:12]</size>" as I48 <<INF>>
+    rectangle "<b>#49</b> Demo preindexada en la VM\n<size:9>[INF · S | ES:11 LF:13]</size>" as I49 <<INF>>
+    rectangle "<b>#50</b> Gobernanza de costos y ciclo de vida\n<size:9>[INF · M | ES:11 LF:12]</size>" as I50 <<INF>>
+    rectangle "<b>#51</b> Revisión de seguridad y hardening\n<size:9>[INF · M | ES:12 LF:13]</size>" as I51 <<INF>>
+    rectangle "<b>#52</b> Tests de integración de API con dependencias simuladas\n<size:9>[QAD · L | ES:12 LF:13]</size>" as I52 <<QAD>>
+    rectangle "<b>#53</b> Suite E2E de criterios críticos 🔥\n<size:9>[QAD · L | ES:14 LF:14]</size>" as I53 <<QAD>>
+    rectangle "<b>#54</b> Smoke tests reales contra OCI y Gemini\n<size:9>[QAD · M | ES:12 LF:13]</size>" as I54 <<QAD>>
+}
+
+package "Fase 6: Demo y Entrega" as F6 {
+    rectangle "<b>#55</b> Generar y persistir resultados demo etiquetados\n<size:9>[QAD · M | ES:12 LF:14]</size>" as I55 <<QAD>>
+    rectangle "<b>#56</b> Guion de demo, grabación de respaldo y evidencias 🔥\n<size:9>[QAD · M | ES:15 LF:15]</size>" as I56 <<QAD>>
+    rectangle "<b>#57</b> README final con arquitectura y guía de instalación 🔥\n<size:9>[QAD · M | ES:16 LF:16]</size>" as I57 <<QAD>>
+    rectangle "<b>#58</b> Guía de despliegue en OCI\n<size:9>[INF · S | ES:12 LF:15]</size>" as I58 <<INF>>
+    rectangle "<b>#59</b> Referencia de API (OpenAPI)\n<size:9>[API · S | ES:12 LF:15]</size>" as I59 <<API>>
+    rectangle "<b>#60</b> Evaluación pedagógica multilingüe con anotación humana\n<size:9>[QAD · L | ES:10 LF:14]</size>" as I60 <<QAD>>
+}
+
+' ==========================================
+' RELACIONES DE PRECEDENCIA (167 ARISTAS)
+' ==========================================
+I01 -[#DC2626,bold]-> I02
+I01 -[#DC2626,bold]-> I03
+I01 --> I04
+I01 --> I06
+I02 -[#DC2626,bold]-> I10
+I03 --> I07
+I03 -[#DC2626,bold]-> I10
+I03 --> I11
+I03 --> I13
+I03 --> I15
+I03 --> I21
+I03 --> I22
+I03 --> I24
+I04 --> I09
+I04 --> I14
+I05 --> I10
+I05 --> I11
+I05 --> I49
+I05 --> I55
+I05 --> I60
+I06 --> I15
+I07 --> I08
+I07 --> I26
+I08 --> I09
+I08 --> I20
+I09 --> I16
+I09 --> I19
+I09 --> I37
+I09 --> I50
+I10 -[#DC2626,bold]-> I11
+I10 --> I13
+I10 --> I23
+I10 --> I24
+I11 -[#DC2626,bold]-> I12
+I11 --> I30
+I12 -[#DC2626,bold]-> I17
+I13 --> I17
+I14 --> I17
+I14 --> I19
+I14 --> I31
+I14 --> I50
+I14 --> I54
+I15 --> I16
+I15 --> I26
+I16 --> I25
+I16 --> I32
+I16 --> I38
+I16 --> I40
+I16 --> I42
+I17 -[#DC2626,bold]-> I18
+I17 -[#DC2626,bold]-> I19
+I17 --> I30
+I18 -[#DC2626,bold]-> I27
+I18 --> I37
+I18 --> I39
+I19 --> I25
+I19 -[#DC2626,bold]-> I30
+I19 --> I31
+I19 --> I39
+I19 --> I49
+I19 --> I50
+I20 --> I19
+I20 --> I29
+I20 --> I31
+I20 --> I37
+I20 --> I39
+I21 --> I23
+I21 --> I27
+I22 --> I23
+I23 --> I28
+I24 --> I28
+I25 --> I53
+I26 --> I48
+I27 -[#DC2626,bold]-> I29
+I28 --> I29
+I28 --> I30
+I29 -[#DC2626,bold]-> I31
+I29 --> I37
+I29 --> I39
+I29 --> I60
+I30 -[#DC2626,bold]-> I29
+I30 --> I49
+I30 --> I53
+I31 -[#DC2626,bold]-> I32
+I31 --> I33
+I31 --> I35
+I31 --> I42
+I31 --> I43
+I31 --> I48
+I31 --> I50
+I31 --> I51
+I31 --> I52
+I31 --> I54
+I31 --> I55
+I31 --> I60
+I32 --> I33
+I32 -[#DC2626,bold]-> I34
+I32 --> I49
+I33 --> I51
+I33 --> I53
+I34 --> I36
+I34 --> I38
+I34 --> I40
+I34 --> I41
+I34 -[#DC2626,bold]-> I42
+I34 --> I46
+I35 --> I36
+I35 --> I41
+I35 --> I50
+I35 --> I52
+I35 --> I59
+I36 --> I53
+I37 --> I38
+I37 --> I51
+I37 --> I52
+I37 --> I59
+I38 --> I53
+I39 --> I40
+I39 --> I51
+I39 --> I52
+I39 --> I59
+I40 --> I53
+I41 --> I53
+I42 -[#DC2626,bold]-> I46
+I42 --> I53
+I43 --> I42
+I43 --> I44
+I43 --> I45
+I43 --> I46
+I43 --> I50
+I44 --> I46
+I44 --> I51
+I44 --> I54
+I45 --> I46
+I45 --> I51
+I45 --> I52
+I45 --> I54
+I45 --> I59
+I46 -[#DC2626,bold]-> I53
+I47 --> I48
+I48 --> I49
+I48 --> I51
+I48 --> I54
+I48 --> I57
+I48 --> I58
+I48 --> I59
+I49 --> I53
+I49 --> I55
+I49 --> I58
+I50 --> I51
+I50 --> I53
+I50 --> I54
+I50 --> I58
+I51 --> I53
+I52 --> I53
+I53 -[#DC2626,bold]-> I56
+I53 --> I57
+I54 --> I53
+I54 --> I56
+I54 --> I57
+I55 --> I56
+I55 --> I57
+I56 -[#DC2626,bold]-> I57
+I58 --> I57
+I59 --> I57
+I60 --> I56
+I60 --> I57
+
+@enduml
