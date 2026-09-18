@@ -1,9 +1,9 @@
-import os
-import sys
-import re
 import json
-import urllib.request
+import os
+import re
+import sys
 import urllib.error
+import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -17,8 +17,9 @@ repo = os.environ.get("GITHUB_REPOSITORY", "No-Country-simulation/G10-Equipo38-N
 headers = {
     "Authorization": f"Bearer {token}",
     "Accept": "application/vnd.github+json",
-    "User-Agent": "NuevaMente-Dependency-Bot"
+    "User-Agent": "NuevaMente-Dependency-Bot",
 }
+
 
 def api_call(url, data=None, method="GET"):
     req_data = json.dumps(data).encode("utf-8") if data is not None else None
@@ -26,9 +27,10 @@ def api_call(url, data=None, method="GET"):
     with urllib.request.urlopen(req) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
+
 def main():
     print(f"Checking dependencies for repository: {repo}")
-    
+
     all_issues = []
     page = 1
     while True:
@@ -43,17 +45,17 @@ def main():
 
     states = {it["number"]: it["state"] for it in all_issues if "pull_request" not in it}
     open_issues = [it for it in all_issues if it.get("state") == "open" and "pull_request" not in it]
-    
+
     print(f"Total issues: {len(states)}, Open issues: {len(open_issues)}")
-    
+
     updated_count = 0
     unblocked_count = 0
 
     for issue in open_issues:
         num = issue["number"]
         body = issue["body"] or ""
-        labels = [l["name"] for l in issue.get("labels", [])]
-        
+        labels = [lbl["name"] for lbl in issue.get("labels", [])]
+
         if "### ⛔ Bloqueado por" not in body and "### 🟢 Estado" not in body:
             continue
 
@@ -61,7 +63,7 @@ def main():
         if not dep_matches:
             # 0 dependencies (root issue) -> should be ready
             if "status:blocked" in labels or "status:ready" not in labels:
-                new_labels = [l for l in labels if not l.startswith("status:")] + ["status:ready"]
+                new_labels = [lbl for lbl in labels if not lbl.startswith("status:")] + ["status:ready"]
                 patch_url = f"https://api.github.com/repos/{repo}/issues/{num}"
                 api_call(patch_url, {"labels": new_labels}, method="PATCH")
                 print(f"Issue #{num} (Root) labeled as status:ready")
@@ -70,18 +72,18 @@ def main():
         all_deps_closed = True
         new_body = body
         body_changed = False
-        
+
         for m in dep_matches:
-            is_checked = (m.group(1).lower() == "x")
+            is_checked = m.group(1).lower() == "x"
             dep_num = int(m.group(2))
             rest = m.group(3)
-            
+
             dep_state = states.get(dep_num, "open")
-            is_dep_closed = (dep_state == "closed")
-            
+            is_dep_closed = dep_state == "closed"
+
             if not is_dep_closed:
                 all_deps_closed = False
-                
+
             if is_dep_closed != is_checked:
                 body_changed = True
                 old_line = m.group(0)
@@ -92,8 +94,8 @@ def main():
         was_blocked = "status:blocked" in labels
         was_ready = "status:ready" in labels
         label_changed = False
-        new_labels = [l for l in labels if not l.startswith("status:")]
-        
+        new_labels = [lbl for lbl in labels if not lbl.startswith("status:")]
+
         if all_deps_closed:
             new_labels.append("status:ready")
             if not was_ready or was_blocked:
@@ -110,11 +112,11 @@ def main():
                 payload["body"] = new_body
             if label_changed:
                 payload["labels"] = new_labels
-                
+
             api_call(patch_url, payload, method="PATCH")
             updated_count += 1
             print(f"Updated Issue #{num}: all_deps_closed={all_deps_closed}, labels={new_labels}")
-            
+
             if was_blocked and all_deps_closed:
                 unblocked_count += 1
                 comment_url = f"https://api.github.com/repos/{repo}/issues/{num}/comments"
@@ -125,6 +127,7 @@ def main():
                 print(f"  Posted unblocked comment on #{num}")
 
     print(f"\nDependency sync complete: {updated_count} issues updated, {unblocked_count} newly unblocked.")
+
 
 if __name__ == "__main__":
     main()
