@@ -1,4 +1,9 @@
 # Política de dependencias del backend (decisiones_proyecto.md §12.3 y §14.3):
 # - Versiones exactas con "==" fijadas por cambio explícito; nunca rangos ni floating.
 # - Cada adición llega con su issue correspondiente y su verificación en CI.
-# - Sin dependencias aún: FastAPI/Uvicorn se añaden con el issue #07.
+#
+# pydantic (issue #03): motor de validación de TODOS los contratos compartidos
+# (backend/app/schemas/). La versión 2.x es decisión de §7.2: usa enums, límites,
+# validadores semánticos y unión discriminada; el extra="forbid" rechaza campos
+# desconocidos, que es lo que impide que un contrato crezca en silencio.
+pydantic==2.13.5

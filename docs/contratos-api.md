@@ -1,7 +1,7 @@
 # 🔌 Contratos API v1 — NuevaMente
 
-> **Estado**: especificación propuesta v1; Issue 03 la valida y congela con ejemplos ejecutables. Cambios posteriores requieren revisión contract-change.
-> **Fuente**: `decisiones_proyecto.md` §3.3, §7, §16, §17. La implementación viva es el OpenAPI en `/docs` (issue `Issue 59`).
+> **Estado**: contrato v1 **CONGELADO** por el issue `Issue 03`. Implementación viva: [`backend/app/schemas/`](../backend/app/schemas/) (Pydantic v2); ejemplos ejecutables: `backend/tests/test_schemas.py` (round-trip + rechazo de inválidos). Cambios posteriores requieren PR etiquetado `contract-change` con revisión API+UI+AGT+RAG y este documento actualizado en el mismo PR.
+> **Fuente**: `decisiones_proyecto.md` §3.3, §7, §16, §17. La referencia navegable por HTTP será el OpenAPI en `/docs` (issue `Issue 59`).
 > **Uso**: backend implementa contra este documento; frontend construye contra este documento. Ambos lo tratan como la interfaz compartida.
 
 ---
@@ -254,6 +254,89 @@ Notas de contrato:
 - El canónico solo contiene bucket/objeto_id; no confirma su propia escritura. persistencia.status_upload se añade exclusivamente en la respuesta del trabajo tras verificar el objeto.
 - alcance conserva la estructura de entrada y agrega secciones cubiertas; no alterna objeto/string según formato.
 - La respuesta HTTP del trabajo agrega `persistencia.status_upload` en el nivel del trabajo cuando `completed`.
+
+### Ejemplos válidos de `contenido_adaptado` por formato
+
+Estos JSON validan contra la implementación congelada; `backend/tests/test_schemas.py` los usa como fixtures, de modo que documento y código no pueden divergir en silencio. El ejemplo de `flashcards` es el del paquete completo de arriba.
+
+#### `quiz`
+
+```json
+{
+  "tipo": "quiz",
+  "titulo": "Quiz: fundamentos de VCN",
+  "preguntas": [
+    {
+      "id": "q_001",
+      "enunciado": "¿Qué delimita una VCN dentro de OCI?",
+      "opciones": [
+        { "option_id": "A", "texto": "Un rango CIDR elegido al crearla" },
+        { "option_id": "B", "texto": "El nombre de la región" },
+        { "option_id": "C", "texto": "La lista de usuarios" },
+        { "option_id": "D", "texto": "El tamaño del bucket" }
+      ],
+      "correct_option_id": "A",
+      "justificacion": "La VCN se define por su bloque CIDR; B, C y D no delimitan redes.",
+      "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+    }
+  ]
+}
+```
+
+#### `tutorial`
+
+```json
+{
+  "tipo": "tutorial",
+  "titulo": "Tu primera VCN en 3 pasos",
+  "audiencia": "Principiantes en cloud",
+  "prerrequisitos": ["Cuenta de OCI"],
+  "pasos": [
+    {
+      "id": "paso_1",
+      "instruccion": "Abre el menú de redes y elige 'Virtual Cloud Networks'.",
+      "resultado_esperado": "Ves la lista de VCNs del compartment.",
+      "verificacion": "El botón 'Create VCN' está habilitado.",
+      "codigo": null,
+      "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+    }
+  ]
+}
+```
+
+#### `resumen_ejecutivo`
+
+```json
+{
+  "tipo": "resumen_ejecutivo",
+  "titulo": "VCN para decisiones de negocio",
+  "puntos_clave": ["Una VCN aísla y organiza los recursos de red."],
+  "impacto_cualitativo": "Reduce riesgo de exposición sin costo adicional en Always Free.",
+  "implicaciones": ["Toda arquitectura nueva debe nacer dentro de una VCN."],
+  "acciones": ["Definir convención de rangos CIDR por ambiente."],
+  "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+}
+```
+
+#### `guion_clase`
+
+```json
+{
+  "tipo": "guion_clase",
+  "titulo": "Clase introductoria: redes en la nube",
+  "objetivos": ["Explicar el concepto de red virtual privada."],
+  "escenas": [
+    {
+      "id": "esc_1",
+      "duracion_min": 2.5,
+      "narracion": "Comencemos con una analogía: la ciudad y sus barrios...",
+      "puntos_diapositiva": ["VCN = barrio privado", "Aislamiento por diseño"],
+      "pregunta_interactiva": "¿Qué separaría un barrio de otro?",
+      "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+    }
+  ]
+}
+```
 
 ---
 
