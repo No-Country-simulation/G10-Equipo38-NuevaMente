@@ -30,9 +30,12 @@ import os
 # --- 1) Entorno de test: ANTES de cualquier import de aplicación. ----------
 # El orden importa: estos valores deben estar fijados cuando app.config o
 # app.storage se importen por primera vez, porque leen el entorno al cargar.
-os.environ.setdefault("MOCK_OCI", "1")
-os.environ.setdefault("MOCK_GEMINI", "1")
-os.environ.setdefault("APP_ENV", "test")
+# Se respeta un valor PREEXISTENTE y no vacío (la CI publica APP_ENV=ci desde
+# el issue #02); un valor vacío cuenta como no definido, porque una variable
+# en blanco es un descuido del entorno, no una decisión que haya que respetar.
+for _variable, _valor in (("MOCK_OCI", "1"), ("MOCK_GEMINI", "1"), ("APP_ENV", "test")):
+    if not os.environ.get(_variable):
+        os.environ[_variable] = _valor
 
 import pytest  # noqa: E402 (el import va deliberadamente después del entorno)
 
