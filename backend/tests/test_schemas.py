@@ -485,3 +485,8 @@ def test_todos_los_json_publicados_en_contratos_api_md_validan():
         "peticion": 1,  # el body de POST /api/generate
         "trabajo": 1,  # la respuesta 202 del trabajo
     }
+
+
+# Marca de modulo (infraestructura del issue #10): la CI selecciona
+# solo unit + integration_mock; integration_real jamas corre en CI (#54).
+pytestmark = pytest.mark.unit

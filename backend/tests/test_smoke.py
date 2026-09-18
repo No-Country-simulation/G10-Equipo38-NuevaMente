@@ -18,6 +18,8 @@ silencioso.
 
 import importlib
 
+import pytest
+
 # Mapa del monorepo: cada entrada es un paquete que el issue #01 creo y que
 # issues futuros llenaran (ver el docstring de cada __init__.py para saber
 # que le toca a cada uno). Si se agrega un paquete nuevo al arbol de §15,
@@ -64,3 +66,8 @@ def test_paquetes_del_frontend_importables():
     """
     for nombre in PAQUETES_FRONTEND:
         importlib.import_module(nombre)
+
+
+# Marca de modulo (infraestructura del issue #10): la CI selecciona
+# solo unit + integration_mock; integration_real jamas corre en CI (#54).
+pytestmark = pytest.mark.unit

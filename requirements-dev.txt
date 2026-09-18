@@ -24,5 +24,16 @@ pytest==9.1.1
 # Es herramienta de documentacion, no dependencia de los servicios en runtime.
 reportlab==5.0.1
 
-# Plugins de pytest (cobertura, async, etc.): se anadiran con version exacta
+# Infraestructura de tests (issue #10):
+# - pytest-asyncio: corrida de tests async def (asyncio_mode=auto en pytest.ini).
+pytest-asyncio==1.4.0
+# - httpx: cliente HTTP de la sesion de API en memoria (conftest raiz); tambien
+#   respalda TestClient del esqueleto FastAPI (#07).
+httpx==0.28.1
+# - pypdf: verificacion/extraccion de PDFs en fixtures y generacion del cifrado.
+pypdf==6.19.0
+# - chromadb: prueba de indexacion de los embeddings del doble (ephemeral, sin red).
+chromadb==1.5.9
+
+# Plugins de pytest (cobertura, etc.): se anadiran con version exacta
 # en el momento en que los tests de cada issue los necesiten — no antes.
