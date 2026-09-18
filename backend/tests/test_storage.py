@@ -230,3 +230,8 @@ def test_factory_mock_oci_0_con_credenciales_sigue_fallando_hasta_el_issue_14(tm
     with pytest.raises(StorageConfigError) as info:
         get_storage_provider(base_dir=tmp_path)
     assert "issue #14" in str(info.value)
+
+
+# Marca de modulo (infraestructura del issue #10): la CI selecciona
+# solo unit + integration_mock; integration_real jamas corre en CI (#54).
+pytestmark = pytest.mark.unit
