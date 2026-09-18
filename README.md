@@ -1,5 +1,7 @@
 # 🎓 NuevaMente — Sistema Inteligente de Adaptación y Generación de Contenido Educativo
 
+[![CI](https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente/actions/workflows/ci.yml?query=branch%3Adevelop)
+
 > **Hackathon Oracle Next Education (ONE) — Alura Latam**  
 > **Grupo 10 · Equipo 38**  
 > **Sector Empresarial**: EdTech / Capacitación Corporativa / Plataformas de Educación Técnica  
@@ -160,8 +162,8 @@ cd G10-Equipo38-NuevaMente
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 2. Instalar dependencias fijadas (desde la raíz)
-pip install -r backend/requirements.txt -r frontend/requirements.txt
+# 2. Instalar dependencias fijadas (desde la raíz): servicios + herramientas de desarrollo
+pip install -r backend/requirements.txt -r frontend/requirements.txt -r requirements-dev.txt
 
 # 3. Verificar el esqueleto del backend (paquete importable)
 cd backend && python -c "import app" && cd ..
@@ -169,9 +171,10 @@ cd backend && python -c "import app" && cd ..
 # 4. Variables de entorno: copiar template y completar placeholders (Apéndice A)
 cp .env.example .env
 
-# 5. Lint y formato (ruff, 120 cols, py311)
+# 5. Los mismos chequeos que corre la CI en cada PR (ruff + pytest, ambos desde la raíz)
 ruff check .
 ruff format --check .
+pytest
 
 # 6. Compose preliminar (esqueleto; endurecimiento con el issue #26)
 docker compose build
