@@ -112,7 +112,11 @@ def test_produccion_incompleta_falla_al_arrancar_con_mensaje_accionable():
     """Criterio 3: APP_ENV=production + placeholders => no arranca, y el error
     nombra CADA variable faltante de una vez (arreglable en un ciclo)."""
     with pytest.raises(ConfiguracionIncompleta) as info:
-        crear_app(Configuracion(app_env="production"))
+        # mock_oci/mock_gemini EXPLICITOS en False: pydantic-settings tambien
+        # lee el entorno, y la CI publica MOCK_OCI=1 a nivel job; sin esto, la
+        # construccion heredaria el mock y reventaria por "production no admite
+        # mocks" ANTES de llegar a la validacion que este test quiere probar.
+        crear_app(Configuracion(app_env="production", mock_oci=False, mock_gemini=False))
     mensaje = str(info.value)
     for variable in ("GOOGLE_API_KEY", "OCI_COMPARTMENT_ID", "OCI_CONFIG_FILE", "OCI_REGION"):
         assert variable in mensaje, f"el mensaje no nombra {variable}"
@@ -130,6 +134,9 @@ def test_produccion_completa_arranca(tmp_path):
     app = crear_app(
         Configuracion(
             app_env="production",
+            # Idem test anterior: explicitos para no heredar los mocks de la CI.
+            mock_oci=False,
+            mock_gemini=False,
             google_api_key="AIza_real_de_prueba",
             oci_compartment_id="ocid1.compartment.oc1..x",
             oci_region="us-ashburn-1",
