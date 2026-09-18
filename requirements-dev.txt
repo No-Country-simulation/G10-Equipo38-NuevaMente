@@ -28,7 +28,8 @@ reportlab==5.0.1
 # - pytest-asyncio: corrida de tests async def (asyncio_mode=auto en pytest.ini).
 pytest-asyncio==1.4.0
 # - httpx: cliente HTTP de la sesion de API en memoria (conftest raiz); tambien
-#   respalda TestClient del esqueleto FastAPI (#07).
+#   respalda TestClient del esqueleto FastAPI (#07): sin ella, la importacion
+#   de starlette.testclient explota en entornos limpios como la CI.
 httpx==0.28.1
 # - pypdf: verificacion/extraccion de PDFs en fixtures y generacion del cifrado.
 pypdf==6.19.0

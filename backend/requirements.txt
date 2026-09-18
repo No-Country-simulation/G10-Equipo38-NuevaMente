@@ -7,3 +7,13 @@
 # validadores semánticos y unión discriminada; el extra="forbid" rechaza campos
 # desconocidos, que es lo que impide que un contrato crezca en silencio.
 pydantic==2.13.5
+#
+# fastapi (issue #07): framework del servicio backend (§7). Expone /api/health,
+# los endpoints futuros (#9, #19, #31...) y el OpenAPI vivo en /docs.
+fastapi==0.141.1
+# uvicorn (issue #07): servidor ASGI que ejecuta la app FastAPI. Es el proceso
+# que corre en el contenedor del backend (Dockerfile, §14).
+uvicorn==0.53.0
+# pydantic-settings (issue #07): lee la configuración desde variables de
+# entorno/.env con los tipos y validaciones de app/config.py (Apéndice A).
+pydantic-settings==2.15.0
