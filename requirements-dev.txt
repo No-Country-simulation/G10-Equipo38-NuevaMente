@@ -20,5 +20,9 @@ ruff==0.16.8
 # define donde estan los tests y que rutas de import agregar.
 pytest==9.1.1
 
+# Generador del documento demo PDF (documents/generar_pdf_vcn.py, issue #05).
+# Es herramienta de documentacion, no dependencia de los servicios en runtime.
+reportlab==5.0.1
+
 # Plugins de pytest (cobertura, async, etc.): se anadiran con version exacta
 # en el momento en que los tests de cada issue los necesiten — no antes.
