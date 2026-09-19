@@ -184,6 +184,11 @@ def parse_args() -> argparse.Namespace:
         help="Token de GitHub con permisos de issues:write (default: variable GITHUB_TOKEN).",
     )
     parser.add_argument(
+        "--token-file",
+        default=os.environ.get("GITHUB_TOKEN_FILE"),
+        help="Ruta a archivo con GITHUB_TOKEN (opcional).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Ejecuta la comparación sin escribir cambios en GitHub.",
@@ -195,19 +200,19 @@ def main() -> None:
     args = parse_args()
 
     token = args.token
-    if not token:
-        # Intentar cargar desde C:\Users\dave3\DavidGeneral\CosasSecretas\.env.github en desarrollo local
-        env_secret_path = r"C:\Users\dave3\DavidGeneral\CosasSecretas\.env.github"
-        if os.path.exists(env_secret_path):
-            with open(env_secret_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("GITHUB_TOKEN="):
-                        token = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        break
+    if not token and args.token_file and os.path.exists(args.token_file):
+        with open(args.token_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("GITHUB_TOKEN="):
+                    token = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+                elif line and not line.startswith("#") and "=" not in line:
+                    token = line
+                    break
 
     if not token:
-        print("ERROR: Debe proporcionar un token de GitHub vía --token, GITHUB_TOKEN o archivo local.", file=sys.stderr)
+        print("ERROR: Debe proporcionar un token de GitHub vía --token, GITHUB_TOKEN o --token-file.", file=sys.stderr)
         sys.exit(1)
 
     try:
