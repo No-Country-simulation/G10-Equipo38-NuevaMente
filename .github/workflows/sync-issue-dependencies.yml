@@ -1,0 +1,33 @@
+name: Sincronizar dependencias de issues
+
+on:
+  issues:
+    types: [closed, reopened]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+# Evita condiciones de carrera si varios issues se cierran al mismo tiempo
+concurrency:
+  group: sync-issue-dependencies
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v5
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sincronizar checkboxes de dependencias en Markdown
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python .github/scripts/sync_issue_dependencies.py
