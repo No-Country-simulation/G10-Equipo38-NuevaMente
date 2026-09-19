@@ -60,13 +60,13 @@ class Referencia(BaseModel):
     seccion: str | None = Field(default=None, description="Sección/título del documento original.")
 
 
-class Alcance(BaseModel):
+class AlcanceSolicitud(BaseModel):
     """Qué parte del documento se adapta (§16.1).
 
     Se usa DOS veces con el mismo modelo: en la petición de generación
     (``{"tipo": "documento_completo"}`` o ``{"tipo": "seccion",
-    "seccion_id": "sec_3"}``) y dentro de ``metadatos`` del paquete, donde
-    el backend AGREGA ``secciones_cubiertas`` para declarar la cobertura
+    "seccion_id": "sec_3"}``). La subclase de salida ``Alcance``, dentro de
+    ``metadatos``, agrega ``secciones_cubiertas`` para declarar la cobertura
     real lograda (contratos-api.md: "alcance conserva la estructura de
     entrada y agrega secciones cubiertas; no alterna objeto/string").
     """
@@ -74,23 +74,29 @@ class Alcance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tipo: Literal["documento_completo", "seccion"] = Field(
-        description="documento_completo es el valor por defecto; seccion exige seccion_id."
+        default="documento_completo",
+        description="documento_completo es el valor por defecto; seccion exige seccion_id.",
     )
     seccion_id: str | None = Field(
         default=None,
         description="Obligatorio cuando tipo=seccion; ignorado en documento_completo.",
     )
+
+    @model_validator(mode="after")
+    def _seccion_exige_seccion_id(self) -> "AlcanceSolicitud":
+        """Validación semántica: elegir 'seccion' sin decir cuál es un error."""
+        if self.tipo == "seccion" and (not self.seccion_id or not self.seccion_id.strip()):
+            raise ValueError("alcance.tipo='seccion' exige seccion_id no vacío")
+        return self
+
+
+class Alcance(AlcanceSolicitud):
+    """Alcance de salida con cobertura calculada por el backend."""
+
     secciones_cubiertas: list[str] | None = Field(
         default=None,
         description="Solo en la respuesta: secciones efectivamente cubiertas por la adaptación.",
     )
-
-    @model_validator(mode="after")
-    def _seccion_exige_seccion_id(self) -> "Alcance":
-        """Validación semántica: elegir 'seccion' sin decir cuál es un error."""
-        if self.tipo == "seccion" and not self.seccion_id:
-            raise ValueError("alcance.tipo='seccion' exige seccion_id no vacío")
-        return self
 
 
 # Calibración inicial de límites de longitud (§16.2 pide "límites de

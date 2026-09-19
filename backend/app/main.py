@@ -34,6 +34,7 @@ para convertir excepciones en respuestas HTTP con la forma del contrato.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from contextvars import ContextVar
 
@@ -133,7 +134,9 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
           petición), se agrega como cabecera de respuesta y se loguea junto
           al método y la ruta (§11.5).
         """
-        request_id = request.headers.get(CABECERA_REQUEST_ID) or f"req_{uuid.uuid4().hex[:12]}"
+        request_id = request.headers.get(CABECERA_REQUEST_ID, "")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id):
+            request_id = f"req_{uuid.uuid4().hex}"
         # Dos formas de publicarlo para el resto del código:
         # - request.state: visible en TODA la cadena, incluidos los handlers
         #   de excepción que corren fuera de este middleware;
@@ -161,7 +164,8 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
             # Sin cookies ni credenciales entre orígenes en este proyecto.
             allow_credentials=False,
             allow_methods=["GET", "POST", "DELETE"],
-            allow_headers=["Authorization", "Content-Type", CABECERA_REQUEST_ID],
+            allow_headers=["Authorization", "Content-Type", CABECERA_REQUEST_ID, "Idempotency-Key", "Last-Event-ID"],
+            expose_headers=[CABECERA_REQUEST_ID],
         )
 
     # ------------------------- Handlers de excepción -------------------------
@@ -181,7 +185,8 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
                 ErrorCode.VALIDATION_ERROR,
                 "La peticion no respeta el contrato del endpoint.",
                 request_id,
-                detalles={"errores": exc.errors()},
+                # No devolver input (puede contener secretos) ni ctx (incluye excepciones no serializables).
+                detalles={"errores": [{k: e[k] for k in ("loc", "msg", "type")} for e in exc.errors()]},
             ),
             headers={CABECERA_REQUEST_ID: request_id},
         )
@@ -194,7 +199,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         return JSONResponse(
             status_code=exc.status_code,
             content=_envoltorio(codigo, str(exc.detail), request_id),
-            headers={CABECERA_REQUEST_ID: request_id},
+            headers={**(exc.headers or {}), CABECERA_REQUEST_ID: request_id},
         )
 
     @app.exception_handler(Exception)
@@ -203,11 +208,12 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
 
         Criterio de aceptación del issue: responde con el envoltorio estándar
         y request_id, y NO expone la stacktrace (detalles sensibles, §7.3).
-        El detalle técnico queda SOLO en el log del servidor, correlacionado
-        por el mismo request_id que ve el cliente.
+        El log conserva el tipo de excepción y request_id, sin el mensaje
+        del proveedor que podría contener documentos o credenciales.
         """
         request_id = _request_id_de(request)
-        logger.exception("Excepcion no manejada request_id=%s", request_id)
+        # Una excepción de proveedor puede incluir prompts, tokens o texto del documento.
+        logger.error("Excepcion no manejada tipo=%s request_id=%s", type(exc).__name__, request_id)
         return JSONResponse(
             status_code=500,
             content=_envoltorio(

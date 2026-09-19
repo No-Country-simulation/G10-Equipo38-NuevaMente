@@ -18,7 +18,7 @@ pytestmark = pytest.mark.integration_mock
 
 
 async def test_chroma_indexa_y_recupera_con_los_embeddings_del_doble(doble_gemini, chunks_sinteticos):
-    chromadb = pytest.importorskip("chromadb", reason="chromadb no instalado en este entorno")
+    import chromadb
 
     cliente = chromadb.EphemeralClient()
     coleccion = cliente.get_or_create_collection("test_doble", embedding_function=None)

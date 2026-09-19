@@ -113,8 +113,6 @@ def test_placeholders_identicos_entre_idiomas():
 
     for clave, texto_es in CATALOGOS["es"].items():
         marcas_es = set(re.findall(r"\{(\w+)\}", texto_es))
-        if not marcas_es:
-            continue
         for idioma in ("en", "pt"):
             marcas = set(re.findall(r"\{(\w+)\}", CATALOGOS[idioma][clave]))
             assert marcas == marcas_es, (

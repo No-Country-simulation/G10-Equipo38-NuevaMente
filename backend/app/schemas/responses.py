@@ -20,6 +20,7 @@ Las claves JSON van en español porque SON el contrato público (§16.3).
 """
 
 from datetime import datetime
+from math import isclose
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -95,12 +96,12 @@ class EvaluacionCalidad(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    anclaje_fuente_score: float = Field(
+    anclaje_fuente_score: float | None = Field(
         ge=0.0,
         le=1.0,
         description="Proporción de afirmaciones respaldadas por la fuente (§19). Umbral de aprobación: >= 0.85.",
     )
-    cantidad_afirmaciones: int = Field(ge=1, description="Afirmaciones atómicas extraídas del contenido.")
+    cantidad_afirmaciones: int = Field(ge=0, description="Afirmaciones atómicas extraídas del contenido.")
     cantidad_respaldadas: int = Field(ge=0, description="Afirmaciones verificadas contra la evidencia.")
     estado_evaluacion: Literal["aprobada", "requiere_revision", "no_evaluable"]
     claridad_pedagogica: Literal["alta", "media", "baja"]
@@ -121,6 +122,23 @@ class EvaluacionCalidad(BaseModel):
                 f"cantidad_respaldadas ({self.cantidad_respaldadas}) > "
                 f"cantidad_afirmaciones ({self.cantidad_afirmaciones})"
             )
+        if self.estado_evaluacion == "no_evaluable":
+            if self.anclaje_fuente_score is not None:
+                raise ValueError("Una evaluación no evaluable debe tener score nulo")
+            return self
+        if not self.cantidad_afirmaciones or self.anclaje_fuente_score is None:
+            raise ValueError("La evaluación requiere afirmaciones y score")
+        if not isclose(self.anclaje_fuente_score, self.cantidad_respaldadas / self.cantidad_afirmaciones, abs_tol=1e-6):
+            raise ValueError("El score debe ser respaldadas / cantidad_afirmaciones")
+        if self.estado_evaluacion == "aprobada" and (
+            self.anclaje_fuente_score < 0.85
+            or self.cantidad_respaldadas != self.cantidad_afirmaciones
+            or self.razones_bloqueo
+            or self.verificacion_visual == "insuficiente"
+            or self.cobertura_objetivos != "completa"
+            or "baja" in (self.claridad_pedagogica, self.adecuacion_perfil, self.coherencia_didactica)
+        ):
+            raise ValueError("No se puede aprobar contenido con errores conocidos o comprobaciones pendientes")
         return self
 
 
@@ -191,6 +209,14 @@ class PedagogicalOutput(BaseModel):
     trazabilidad: Trazabilidad
     almacenamiento_oci: AlmacenamientoOCI
 
+    @model_validator(mode="after")
+    def _paquete_aprobado_coherente(self) -> "PedagogicalOutput":
+        if self.evaluacion_calidad.estado_evaluacion != "aprobada":
+            raise ValueError("El paquete canónico requiere evaluación aprobada")
+        if self.metadatos.formato_generado.value != self.contenido_adaptado.tipo:
+            raise ValueError("El formato de los metadatos no coincide con el contenido")
+        return self
+
 
 class PersistenciaInfo(BaseModel):
     """Estado de la escritura en OCI, SOLO en la respuesta del trabajo.
@@ -204,7 +230,7 @@ class PersistenciaInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status_upload: Literal["completado", "pendiente", "fallido"]
-    provider: Literal["oci", "mock"] | None = Field(default=None, description="Mock explícito para desarrollo/CI (§8).")
+    provider: Literal["oci", "mock"] = Field(description="Proveedor explícito; mock no acredita persistencia OCI (§8).")
 
 
 class GenerationJobResponse(BaseModel):
@@ -231,3 +257,16 @@ class GenerationJobResponse(BaseModel):
         default=None, description="Agregado por el backend cuando status=completed (§16.3)."
     )
     error: ErrorBody | None = Field(default=None, description="Diagnóstico terminal cuando aplica.")
+
+    @model_validator(mode="after")
+    def _estado_y_contenido(self) -> "GenerationJobResponse":
+        if self.status == JobStatus.COMPLETED:
+            if self.contenido is None or self.persistencia is None or self.persistencia.status_upload != "completado":
+                raise ValueError("completed requiere contenido aprobado y persistencia confirmada")
+            if self.contenido.generation_id != self.generation_id or self.error is not None:
+                raise ValueError("El resultado debe corresponder al trabajo y no contener error")
+        elif self.contenido is not None:
+            raise ValueError("Solo completed puede entregar contenido")
+        if self.posicion_cola is not None and self.status != JobStatus.QUEUED:
+            raise ValueError("Solo queued tiene posición de cola")
+        return self

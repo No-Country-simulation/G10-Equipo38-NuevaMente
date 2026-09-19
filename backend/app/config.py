@@ -54,9 +54,7 @@ class Configuracion(BaseSettings):
         # este archivo es el que se copia desde .env.example.
         env_file=".env",
         env_file_encoding="utf-8",
-        # Rechaza variables de entorno que no correspondan a ningún campo
-        # declarado: un nombre mal tipeado (.ENVIROMENT) se detecta acá y
-        # no se descubre semanas después.
+        # El .env es compartido con frontend; ignorar sus claves ajenas.
         extra="ignore",
     )
 
@@ -100,10 +98,10 @@ class Configuracion(BaseSettings):
     # ------------------------------------------------------------------
     data_dir: str = ".data"
     workspace_retention_days: int = Field(default=30, gt=0)
-    session_max_hours: int = Field(default=24, gt=0)
+    session_max_hours: int = Field(default=24, gt=0, le=24)
     max_generation_attempts: int = Field(default=3, ge=1, le=3)
     generation_deadline_seconds: int = Field(default=300, gt=0)
-    global_heavy_job_concurrency: int = Field(default=1, gt=0)
+    global_heavy_job_concurrency: int = Field(default=1, ge=1, le=1)
     max_queued_jobs: int = Field(default=5, gt=0)
     default_output_language: Literal["es", "en", "pt"] = "es"
 
@@ -170,17 +168,19 @@ class Configuracion(BaseSettings):
             # para entrega real.
             return
 
-        if self.google_api_key == "placeholder":
+        if self.google_api_key.strip() in ("", "placeholder"):
             problemas.append("GOOGLE_API_KEY no esta configurada (queda 'placeholder')")
-        if self.oci_compartment_id == "placeholder":
+        if self.oci_compartment_id.strip() in ("", "placeholder"):
             problemas.append("OCI_COMPARTMENT_ID no esta configurada (queda 'placeholder')")
         if not Path(self.oci_config_file).is_file():
             problemas.append(
                 f"OCI_CONFIG_FILE apunta a un archivo inexistente ({self.oci_config_file}); "
                 "montar las credenciales (§8.2)"
             )
-        if self.oci_region == "home-region-de-la-tenancy":
+        if self.oci_region.strip() in ("", "placeholder", "home-region-de-la-tenancy"):
             problemas.append("OCI_REGION conserva el valor de ejemplo; configurar la home region real")
+        if not self.oci_bucket_name.strip() or self.oci_bucket_name.strip() == "placeholder":
+            problemas.append("OCI_BUCKET_NAME no esta configurada")
 
         if problemas:
             raise ConfiguracionIncompleta(problemas)
