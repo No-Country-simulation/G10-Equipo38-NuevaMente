@@ -13,6 +13,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 
-# Sin punto de entrada aún: main.py llega con el issue #07.
-# Verificación de esqueleto: el paquete app debe ser importable.
-CMD ["python", "-c", "import app; print('backend: paquete app importable')"]
+# El esqueleto FastAPI del issue #07 ya sirve health y errores estándar.
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

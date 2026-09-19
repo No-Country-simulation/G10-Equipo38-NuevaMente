@@ -8,12 +8,11 @@ Responsabilidades de este archivo (las pide el issue):
 
 1. ENTORNO DE TEST: fijar MOCK_OCI=1, APP_ENV=test y MOCK_GEMINI=1 antes
    de que ningún módulo del backend lea el entorno (§12.3: las pruebas
-   ordinarias usan mocks explícitos, sin red ni credenciales). Se usa
-   ``setdefault`` para no pisar valores que la CI ya haya fijado.
+   ordinarias usan mocks explícitos, sin red ni credenciales). La selección
+   explícita de integration_real exige ambos mocks desactivados por entorno.
 2. SESIÓN DE API: fixture `api_cliente` con httpx.AsyncClient contra la
-   app FastAPI SIN abrir puerto (transporte ASGI en memoria). Se degrada
-   con SKIP si el esqueleto FastAPI todavía no está mergeado (PR del
-   issue #07): así este PR puede integrarse en paralelo sin romper la CI.
+   app FastAPI SIN abrir puerto (transporte ASGI en memoria). Una dependencia
+   ausente falla: los issues #07 y #10 ya están integrados.
 
 El bucle de eventos asíncrono lo provee pytest-asyncio (configurado como
 ``asyncio_mode=auto`` en pytest.ini: cualquier test `async def` corre sin
@@ -30,30 +29,33 @@ import os
 # --- 1) Entorno de test: ANTES de cualquier import de aplicación. ----------
 # El orden importa: estos valores deben estar fijados cuando app.config o
 # app.storage se importen por primera vez, porque leen el entorno al cargar.
-# Se respeta un valor PREEXISTENTE y no vacío (la CI publica APP_ENV=ci desde
-# el issue #02); un valor vacío cuenta como no definido, porque una variable
-# en blanco es un descuido del entorno, no una decisión que haya que respetar.
-for _variable, _valor in (("MOCK_OCI", "1"), ("MOCK_GEMINI", "1"), ("APP_ENV", "test")):
-    if not os.environ.get(_variable):
-        os.environ[_variable] = _valor
+import pytest
 
-import pytest  # noqa: E402 (el import va deliberadamente después del entorno)
+
+def pytest_configure(config):
+    """La suite ordinaria no hereda accidentalmente la configuración de producción."""
+    expresion = config.option.markexpr
+    reales = "integration_real" in expresion and "not integration_real" not in expresion
+    if reales:
+        if any(os.environ.get(nombre) != "0" for nombre in ("MOCK_OCI", "MOCK_GEMINI")):
+            raise pytest.UsageError("La suite integration_real exige MOCK_OCI=0 y MOCK_GEMINI=0 explícitos")
+    else:
+        os.environ.update(MOCK_OCI="1", MOCK_GEMINI="1")
+    os.environ["APP_ENV"] = "ci" if os.environ.get("APP_ENV") == "ci" else "test"
 
 
 @pytest.fixture
-async def api_cliente():
+async def api_cliente(request):
     """Sesión HTTP contra la API en memoria (httpx + transporte ASGI).
 
-    Marca integration_mock porque ejercita el stack HTTP completo, aunque
-    sin red: la app FastAPI se invoca directamente. Si el esqueleto del
-    issue #07 aún no está en la rama, el fixture SKIPPEA (no falla): la
-    infraestructura queda lista y se activa al mergear.
+    Para tests integration_mock: la app FastAPI se invoca directamente.
     """
-    pytest.importorskip("app.main", reason="requiere el esqueleto FastAPI del issue #07")
     from app.config import Configuracion
     from app.main import crear_app
     from httpx import ASGITransport, AsyncClient
 
+    if request.node.get_closest_marker("integration_real"):
+        pytest.fail("integration_real no puede usar api_cliente con proveedores mock")
     # Config de test explícita: mocks activados, sin tocar el entorno.
     app = crear_app(Configuracion(app_env="test", mock_oci=True, mock_gemini=True))
     transporte = ASGITransport(app=app)

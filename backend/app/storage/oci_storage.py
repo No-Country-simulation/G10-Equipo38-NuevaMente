@@ -41,8 +41,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from datetime import datetime, timezone
-from pathlib import Path
+from functools import wraps
+from pathlib import Path, PureWindowsPath
+from tempfile import NamedTemporaryFile
 
 from app.storage.provider import (
     ListedObject,
@@ -62,6 +65,31 @@ BUCKET_PRODUCCION = "nuevamente-contenidos-educativos"
 # Variables que exigirá el proveedor real (issue #14), según el Apéndice A.
 VARIABLES_REQUERIDAS_REAL = ("OCI_BUCKET_NAME", "OCI_COMPARTMENT_ID", "OCI_REGION", "OCI_CONFIG_FILE")
 
+# Un proceso escritor; instancias que apuntan al mismo bucket comparten exclusión.
+_LOCKS: dict[Path, object] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _serializado(metodo):
+    @wraps(metodo)
+    def ejecutar(self, *args, **kwargs):
+        with self._lock:
+            return metodo(self, *args, **kwargs)
+
+    return ejecutar
+
+
+def _escribir_atomico(ruta: Path, contenido: bytes) -> None:
+    temporal = None
+    try:
+        with NamedTemporaryFile(dir=ruta.parent, delete=False) as archivo:
+            temporal = Path(archivo.name)
+            archivo.write(contenido)
+        os.replace(temporal, ruta)
+    finally:
+        if temporal is not None:
+            temporal.unlink(missing_ok=True)
+
 
 def _validar_object_name(object_name: str) -> None:
     """Rechaza claves que no respetan el formato del proyecto (§8.1, §11.3).
@@ -75,9 +103,13 @@ def _validar_object_name(object_name: str) -> None:
     if not object_name or object_name.startswith("/") or "\\" in object_name:
         raise StorageInvalidName(f"object_name inválido: {object_name!r}")
     partes = object_name.split("/")
+    if partes[0].casefold() == "_meta.json":
+        raise StorageInvalidName("Nombre reservado para metadatos internos")
     if any(parte in ("", ".", "..") for parte in partes):
         raise StorageInvalidName(f"object_name inválido (segmento vacío o relativo): {object_name!r}")
     for parte in partes:
+        if parte.endswith(".") or PureWindowsPath(parte).is_reserved():
+            raise StorageInvalidName("Nombre no portable entre Windows y Linux")
         if not all(caracter.isalnum() or caracter in "._-@" for caracter in parte):
             raise StorageInvalidName(f"object_name con caracteres no permitidos: {object_name!r}")
 
@@ -97,15 +129,20 @@ class LocalMockStorageProvider(StorageProvider):
             # valor por defecto si no está definida (DATA_DIR del Apéndice A).
             data_dir = os.getenv("DATA_DIR", ".data")
             base_dir = Path(data_dir) / "oci_mock_storage"
-        self.base_dir = Path(base_dir)
+        self.base_dir = Path(base_dir).resolve()
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        with _LOCKS_GUARD:
+            self._lock = _LOCKS.setdefault(self.base_dir, threading.RLock())
 
     # ------------------------- helpers internos -------------------------
 
     def _ruta(self, object_name: str) -> Path:
         """Traduce object_name a ruta de archivo DENTRO del directorio base."""
         _validar_object_name(object_name)
-        return self.base_dir / object_name
+        ruta = (self.base_dir / object_name).resolve()
+        if not ruta.is_relative_to(self.base_dir):
+            raise StorageInvalidName("La ruta escapa del directorio de almacenamiento")
+        return ruta
 
     def _leer_meta(self) -> dict:
         """Carga el índice de metadatos (vacío si nunca se escribió nada)."""
@@ -115,7 +152,7 @@ class LocalMockStorageProvider(StorageProvider):
         return json.loads(archivo.read_text(encoding="utf-8"))
 
     def _escribir_meta(self, meta: dict) -> None:
-        (self.base_dir / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        _escribir_atomico(self.base_dir / "_meta.json", json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"))
 
     @staticmethod
     def _etag_de(contenido: bytes) -> str:
@@ -124,6 +161,7 @@ class LocalMockStorageProvider(StorageProvider):
 
     # ------------------------- operaciones -------------------------
 
+    @_serializado
     def upload(
         self,
         object_name: str,
@@ -155,7 +193,7 @@ class LocalMockStorageProvider(StorageProvider):
                 raise StorageConflict(f"if_match={if_match} != etag actual {etag_actual}: {object_name}")
 
         ruta.parent.mkdir(parents=True, exist_ok=True)
-        ruta.write_bytes(contenido)
+        _escribir_atomico(ruta, contenido)
 
         etag = self._etag_de(contenido)
         meta = self._leer_meta()
@@ -176,6 +214,7 @@ class LocalMockStorageProvider(StorageProvider):
             proveedor="mock",
         )
 
+    @_serializado
     def get(self, object_name: str, *, if_match: str | None = None) -> bytes:
         ruta = self._ruta(object_name)
         if not ruta.exists():
@@ -188,6 +227,7 @@ class LocalMockStorageProvider(StorageProvider):
     def get_as_text(self, object_name: str, *, if_match: str | None = None) -> str:
         return self.get(object_name, if_match=if_match).decode("utf-8")
 
+    @_serializado
     def list(
         self,
         prefix: str = "",
@@ -219,6 +259,7 @@ class LocalMockStorageProvider(StorageProvider):
         # entregó todo.
         return StoragePage(items=items, next_cursor=pagina[-1] if resto else None)
 
+    @_serializado
     def delete(self, object_name: str) -> None:
         ruta = self._ruta(object_name)
         if not ruta.exists():
@@ -245,6 +286,8 @@ def get_storage_provider(base_dir: Path | str | None = None) -> StorageProvider:
     """
     mock_activado = os.getenv("MOCK_OCI", "0").strip() == "1"
     if mock_activado:
+        if os.getenv("APP_ENV", "development").strip().lower() == "production":
+            raise StorageConfigError("APP_ENV=production no admite MOCK_OCI=1")
         return LocalMockStorageProvider(base_dir=base_dir)
 
     faltantes = [variable for variable in VARIABLES_REQUERIDAS_REAL if not os.getenv(variable)]

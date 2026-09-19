@@ -25,14 +25,14 @@ name: CI
 
 # -----------------------------------------------------------------------------
 # ¿CUÁNDO corre? ("triggers")
-#   - pull_request hacia develop: cada PR que el equipo abre para integrar
+#   - pull_request hacia develop o main: cada PR que el equipo abre para integrar
 #     su trabajo. Es lo que hace que "un PR que rompe lint quede bloqueado".
 #   - push a develop y main: confirma que lo recién mergeado sigue sano;
 #     develop es la rama de integración y main la de producción (§13.2).
 # -----------------------------------------------------------------------------
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, main]
   push:
     branches: [develop, main]
 

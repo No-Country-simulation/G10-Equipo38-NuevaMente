@@ -54,6 +54,7 @@ import json
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 
 from app.schemas.enums import DocumentStatus, JobStatus
@@ -70,7 +71,10 @@ MIGRACIONES: list[tuple[int, str]] = [
         1,
         """
         -- Espacios anónimos (§7.4): el código de recuperación SOLO como hash;
-        -- borrado_en NOT NULL actúa como lápida del espacio completo.
+        -- borrado_en actúa como lápida del espacio completo. version_manifiesto
+        -- acompaña el manifiesto OCI del espacio (workspaces/{id}/manifest.json,
+        -- 8.3): lo usa #9 para el control de versión entre pestañas y la
+        -- sincronización de reconstrucción (7.2), NO como contador interno.
         CREATE TABLE workspaces (
             workspace_id   TEXT PRIMARY KEY,
             codigo_hash    TEXT NOT NULL,
@@ -185,6 +189,36 @@ def _hash_de(secreto: str) -> str:
     return hashlib.sha256(secreto.encode("utf-8")).hexdigest()
 
 
+def _sincronizado(metodo):
+    """Serializa también las lecturas de la conexión compartida entre hilos."""
+
+    @wraps(metodo)
+    def ejecutar(self, *args, **kwargs):
+        with self._lock:
+            return metodo(self, *args, **kwargs)
+
+    return ejecutar
+
+
+def _validar_respuesta_cacheada(valor) -> None:
+    """Impide persistir credenciales de sesión/recuperación en el caché de respuestas."""
+    if isinstance(valor, dict):
+        for clave, contenido in valor.items():
+            if str(clave).casefold() in {
+                "recovery_code",
+                "codigo_recuperacion",
+                "token",
+                "session_token",
+                "access_token",
+                "authorization",
+            }:
+                raise ValueError("No se pueden cachear credenciales en claro")
+            _validar_respuesta_cacheada(contenido)
+    elif isinstance(valor, list):
+        for contenido in valor:
+            _validar_respuesta_cacheada(contenido)
+
+
 class RegistroOperativo:
     """Acceso al registro operativo. Una instancia = UNA conexión escritora.
 
@@ -254,6 +288,7 @@ class RegistroOperativo:
                         self._conn.execute("ROLLBACK")
                     raise
 
+    @_sincronizado
     def version_esquema(self) -> int:
         """Versión de esquema vigente en la base (para diagnóstico y tests)."""
         fila = self._conn.execute("SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations").fetchone()
@@ -302,10 +337,11 @@ class RegistroOperativo:
                 (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), _iso(ahora + timedelta(days=dias_validez))),
             )
 
+    @_sincronizado
     def obtener_workspace(self, workspace_id: str) -> dict | None:
         """Datos del espacio, o None si no existe o fue borrado (lápida)."""
         fila = self._conn.execute("SELECT * FROM workspaces WHERE workspace_id = ?", (workspace_id,)).fetchone()
-        if fila is None or fila["borrado_en"] is not None:
+        if fila is None or fila["borrado_en"] is not None or datetime.fromisoformat(fila["expira_en"]) <= _ahora():
             return None
         return dict(fila)
 
@@ -323,12 +359,18 @@ class RegistroOperativo:
            (§11.5).
         """
         with self._lock:
-            self._conn.execute(
-                "UPDATE workspaces SET borrado_en = ? WHERE workspace_id = ? AND borrado_en IS NULL",
-                (_iso(_ahora()), workspace_id),
-            )
-        self.revocar_sesiones_de_workspace(workspace_id)
-        self.agendar_borrado("workspace", workspace_id, workspace_id)
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "UPDATE workspaces SET borrado_en = ? WHERE workspace_id = ? AND borrado_en IS NULL",
+                    (_iso(_ahora()), workspace_id),
+                )
+                self.revocar_sesiones_de_workspace(workspace_id)
+                self.agendar_borrado("workspace", workspace_id, workspace_id)
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
 
     # ------------------------------------------------------------------
     # Sesiones (§7.4)
@@ -346,6 +388,7 @@ class RegistroOperativo:
                 (_hash_de(token), workspace_id, _iso(ahora), _iso(ahora + timedelta(hours=horas_validez))),
             )
 
+    @_sincronizado
     def obtener_sesion(self, token: str) -> dict | None:
         """Resuelve un token a su sesión SOLO si es plenamente válida.
 
@@ -357,7 +400,7 @@ class RegistroOperativo:
         """
         fila = self._conn.execute(
             """
-            SELECT s.*, w.borrado_en AS workspace_borrado_en
+            SELECT s.*, w.borrado_en AS workspace_borrado_en, w.expira_en AS workspace_expira_en
               FROM sessions s
               JOIN workspaces w ON w.workspace_id = s.workspace_id
              WHERE s.token_hash = ?
@@ -366,7 +409,7 @@ class RegistroOperativo:
         ).fetchone()
         if fila is None or fila["revocada_en"] is not None or fila["workspace_borrado_en"] is not None:
             return None
-        if datetime.fromisoformat(fila["expira_en"]) < _ahora():
+        if min(datetime.fromisoformat(fila[c]) for c in ("expira_en", "workspace_expira_en")) <= _ahora():
             return None
         return dict(fila)
 
@@ -428,6 +471,7 @@ class RegistroOperativo:
                     (estado.value, detalle_error, document_id),
                 )
 
+    @_sincronizado
     def obtener_documento(self, document_id: str) -> dict | None:
         """Documento solo si existe y NADIE lo retiró: ni su espacio (lápida
         de workspace) ni él mismo (lápida de documento, §11.5)."""
@@ -452,6 +496,9 @@ class RegistroOperativo:
     ) -> None:
         ahora = _iso(_ahora())
         with self._lock:
+            documento = self.obtener_documento(document_id)
+            if documento is None or documento["workspace_id"] != workspace_id:
+                raise ValueError("El documento no pertenece al espacio o fue retirado")
             self._conn.execute(
                 """
                 INSERT INTO generations (generation_id, workspace_id, document_id, status, creado_en, actualizado_en)
@@ -474,6 +521,7 @@ class RegistroOperativo:
                 (status.value, error_code, error_message, _iso(_ahora()), generation_id),
             )
 
+    @_sincronizado
     def obtener_generacion(self, generation_id: str) -> dict | None:
         """Trabajo solo si existe y nadie lo retiró (lápida propia o del espacio)."""
         if self.esta_borrado("generation", generation_id):
@@ -486,11 +534,21 @@ class RegistroOperativo:
             """,
             (generation_id,),
         ).fetchone()
+        if fila and self.esta_borrado("document", fila["document_id"]):
+            return None
         return dict(fila) if fila else None
 
+    @_sincronizado
     def listar_generaciones(self, workspace_id: str) -> list[dict]:
-        """Listado del espacio (GET /api/generations) sin recursos borrados:
-        excluye generaciones con lápida propia y espacios retirados."""
+        """Listado del espacio (GET /api/generations) sin recursos borrados.
+
+        Excluye, además del espacio retirado:
+        - generaciones con lápida PROPIA, y
+        - generaciones cuyo DOCUMENTO tiene lápida: borrar un documento
+          retira también sus derivados (§8.5: "borrar un documento retira
+          original, índice, derivados, chat y progreso vinculados").
+        """
+        ahora = _iso(_ahora())
         filas = self._conn.execute(
             """
             SELECT g.* FROM generations g
@@ -502,9 +560,14 @@ class RegistroOperativo:
                    WHERE pd.recurso_tipo = 'generation' AND pd.recurso_id = g.generation_id
                      AND pd.purga_despues_en > ?
               )
+              AND NOT EXISTS (
+                  SELECT 1 FROM pending_deletes pd2
+                   WHERE pd2.recurso_tipo = 'document' AND pd2.recurso_id = g.document_id
+                     AND pd2.purga_despues_en > ?
+              )
             ORDER BY g.creado_en DESC
             """,
-            (workspace_id, _iso(_ahora())),
+            (workspace_id, ahora, ahora),
         ).fetchall()
         return [dict(fila) for fila in filas]
 
@@ -512,6 +575,7 @@ class RegistroOperativo:
     # Idempotencia (§7.3): el corazón atómico del issue
     # ------------------------------------------------------------------
 
+    @_sincronizado
     def idempotencia_iniciar(
         self, workspace_id: str, operacion: str, clave: str, cuerpo: str, recurso_id: str | None = None
     ) -> tuple[str, str | None]:
@@ -520,7 +584,7 @@ class RegistroOperativo:
         Es la operación que materializa los criterios 2 del issue, y su
         atomicidad descansa en la PRIMARY KEY (workspace, operacion, clave):
 
-        - Primera vez            -> INSERT OK          -> ("creada", None)
+        - Primera vez: exige recurso_id reservado -> INSERT OK -> ("creada", None)
         - Misma clave + mismo cuerpo -> falla el INSERT -> ("duplicada", mismo recurso_id)
           "Duplicado en curso devuelve el mismo identificador; no crea
           otra generación" (§7.3). El llamador NO repite el trabajo: pasa
@@ -534,6 +598,14 @@ class RegistroOperativo:
         SQLite, no nuestro lock.
         """
         hash_cuerpo = _hash_de(cuerpo)
+        fila = self._conn.execute(
+            "SELECT hash_cuerpo, recurso_id FROM idempotency_keys WHERE workspace_id = ? AND operacion = ? AND clave = ?",
+            (workspace_id, operacion, clave),
+        ).fetchone()
+        if fila is not None:
+            return ("duplicada", fila["recurso_id"]) if fila["hash_cuerpo"] == hash_cuerpo else ("conflicto", None)
+        if not recurso_id:
+            raise ValueError("Una intención nueva exige recurso_id reservado antes de iniciar el trabajo")
         try:
             with self._lock:
                 self._conn.execute(
@@ -564,7 +636,14 @@ class RegistroOperativo:
         `test_la_base_no_guarda_secretos_en_claro` leyendo los BYTES crudos
         del archivo.
         """
+        _validar_respuesta_cacheada(respuesta)
         with self._lock:
+            fila = self._conn.execute(
+                "SELECT recurso_id FROM idempotency_keys WHERE workspace_id = ? AND operacion = ? AND clave = ?",
+                (workspace_id, operacion, clave),
+            ).fetchone()
+            if fila is None or fila["recurso_id"] != recurso_id:
+                raise ValueError("La respuesta debe conservar el recurso reservado")
             self._conn.execute(
                 """
                 UPDATE idempotency_keys
@@ -604,6 +683,7 @@ class RegistroOperativo:
             )
             return int(cursor.lastrowid)
 
+    @_sincronizado
     def eventos_desde(self, generation_id: str, ultimo_id: int = 0) -> list[dict]:
         """Eventos del stream posteriors a `ultimo_id` (header Last-Event-ID, §3.3).
 
@@ -649,6 +729,7 @@ class RegistroOperativo:
                 ),
             )
 
+    @_sincronizado
     def esta_borrado(self, recurso_tipo: str, recurso_id: str) -> bool:
         """True si hay lápida vigente del recurso (aún no purgada)."""
         fila = self._conn.execute(

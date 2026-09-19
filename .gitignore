@@ -25,6 +25,8 @@ wheels/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
 oci_api_key*.pem
@@ -38,6 +40,12 @@ chroma_db/
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 uploads/
 **/uploads/
 

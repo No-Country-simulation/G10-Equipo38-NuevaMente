@@ -21,7 +21,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.enums import DetailLevel, IndustryNiche, OutputLanguage, RecipientProfile
-from app.schemas.pedagogical import Alcance
+from app.schemas.pedagogical import AlcanceSolicitud
 
 
 class GenerateRequest(BaseModel):
@@ -39,7 +39,9 @@ class GenerateRequest(BaseModel):
     nicho_sector: IndustryNiche
     nivel_detalle: DetailLevel
     idioma_salida: OutputLanguage
-    alcance: Alcance = Field(description="Documento completo o sección explícita.")
+    alcance: AlcanceSolicitud = Field(
+        default_factory=AlcanceSolicitud, description="Documento completo o sección explícita."
+    )
 
 
 class UploadRequest(BaseModel):
@@ -129,6 +131,7 @@ class ProgressEvent(BaseModel):
     tipo: Literal["concepto_revisado", "flashcard_vista"]
     document_id: str | None = None
     generation_id: str | None = None
+    flashcard_id: str | None = Field(default=None, min_length=1)
     concepto: str | None = Field(default=None, description="Nombre del concepto para concepto_revisado.")
 
     @model_validator(mode="after")
@@ -136,4 +139,8 @@ class ProgressEvent(BaseModel):
         """Un evento concepto_revisado sin concepto no aporta nada al progreso."""
         if self.tipo == "concepto_revisado" and not self.concepto:
             raise ValueError("tipo='concepto_revisado' exige concepto no vacío")
+        if self.tipo == "concepto_revisado" and not self.document_id:
+            raise ValueError("concepto_revisado exige document_id")
+        if self.tipo == "flashcard_vista" and (not self.generation_id or not self.flashcard_id):
+            raise ValueError("flashcard_vista exige generation_id y flashcard_id")
         return self

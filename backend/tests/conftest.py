@@ -190,16 +190,20 @@ def chunks_sinteticos() -> list[Chunk]:
 
 
 @pytest.fixture
-def doble_gemini() -> DobleGemini:
+def doble_gemini(request) -> DobleGemini:
     """Doble fresco por test; el reset al final evita filtrar estado entre tests."""
+    if request.node.get_closest_marker("integration_real"):
+        pytest.fail("integration_real no puede usar el doble de Gemini")
     doble = DobleGemini()
     yield doble
     doble.reset()
 
 
 @pytest.fixture
-def mock_storage(tmp_path) -> LocalMockStorageProvider:
+def mock_storage(tmp_path, request) -> LocalMockStorageProvider:
     """StorageProvider local aislado en tmp_path (MOCK_OCI=1 del entorno)."""
+    if request.node.get_closest_marker("integration_real"):
+        pytest.fail("integration_real no puede usar mock_storage")
     return LocalMockStorageProvider(base_dir=tmp_path / "oci_mock_storage")
 
 

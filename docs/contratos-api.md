@@ -351,3 +351,13 @@ La UI permite copiar/descargar el código una vez, rotarlo, cerrar sesión y bor
 3. Límites operativos (§7.5) se expresan vía 429 con `code` específico y mensaje con posición/expectativa.
 4. Todo listado es paginado (`limit`, `cursor`).
 5. Los nombres internos de clases pueden diferir; este JSON es el contrato público y sus claves no cambian sin `contract-change`.
+
+### Precisiones de validación de v1 (revisión de Issue 03)
+
+- `alcance` omitido selecciona `documento_completo`. `secciones_cubiertas` pertenece exclusivamente a la salida.
+- `concepto_revisado` exige `document_id` y `concepto`; `flashcard_vista` exige `generation_id` y `flashcard_id` (el `id` del ítem). Ambos requieren `event_id`.
+- `no_evaluable` admite cero afirmaciones y exige score nulo. En evaluaciones completas, el score es respaldadas/total. No se aprueban afirmaciones sin respaldo conocido, bloqueos ni verificaciones insuficientes (§19).
+- El paquete canónico exige evaluación aprobada y coincidencia entre formato declarado y contenido. Un trabajo solo entrega contenido en `completed`, con el mismo `generation_id` y persistencia confirmada. `persistencia.provider` es obligatorio: `mock` identifica almacenamiento local, sin acreditar OCI.
+- La reserva SQLite de idempotencia exige un `recurso_id` desde la primera llamada; los reintentos en curso reutilizan ese ID y completar la operación no puede cambiarlo. No se cachean credenciales.
+
+Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqueta `contract-change` al abrir el PR.

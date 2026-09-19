@@ -111,19 +111,15 @@ def test_la_recuperacion_solo_toca_los_running(ruta_db):
     primero = RegistroOperativo(ruta_db)
     _espacio_de_ejemplo(primero)
     primero.registrar_generacion("gen_2", "ws_1", "doc_1", JobStatus.RUNNING)
+    primero.registrar_generacion("gen_3", "ws_1", "doc_1", JobStatus.QUEUED)
     primero.actualizar_generacion("gen_1", JobStatus.COMPLETED)
     primero.cerrar()
 
     segundo = RegistroOperativo(ruta_db)
     assert segundo.obtener_generacion("gen_1")["status"] == "completed"  # terminal intacto
     assert segundo.obtener_generacion("gen_2")["status"] == "failed"  # running -> failed
-    # La generación "ws_1/gen_1" venía queued y SIGUE queued.
-    # (gen_1 se completó; usamos otra para comprobar el queued:)
-    segundo.registrar_generacion("gen_3", "ws_1", "doc_1", JobStatus.QUEUED)
+    assert segundo.obtener_generacion("gen_3")["status"] == "queued"  # queued intacto
     segundo.cerrar()
-    tercero = RegistroOperativo(ruta_db)
-    assert tercero.obtener_generacion("gen_3")["status"] == "queued"
-    tercero.cerrar()
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +131,7 @@ def test_idempotencia_misma_clave_mismo_cuerpo_devuelve_mismo_recurso(store):
     """Criterio 2a: el reintento NO duplica el recurso; devuelve el mismo id."""
     cuerpo = '{"document_id": "doc_1", "formato_salida": "flashcards"}'
 
-    resultado_1, recurso_1 = store.idempotencia_iniciar("ws_1", "generate", "clave-1", cuerpo)
+    resultado_1, recurso_1 = store.idempotencia_iniciar("ws_1", "generate", "clave-1", cuerpo, recurso_id="gen_1")
     assert resultado_1 == "creada"
     # El trabajo "real" crea el recurso y cierra la intención.
     store.idempotencia_completar("ws_1", "generate", "clave-1", "gen_1")
@@ -148,29 +144,29 @@ def test_idempotencia_misma_clave_mismo_cuerpo_devuelve_mismo_recurso(store):
 
 def test_idempotencia_misma_clave_cuerpo_distinto_conflicto(store):
     """Criterio 2b: misma clave con otro cuerpo -> conflicto (la API: 409)."""
-    store.idempotencia_iniciar("ws_1", "generate", "clave-1", '{"formato": "quiz"}')
+    store.idempotencia_iniciar("ws_1", "generate", "clave-1", '{"formato": "quiz"}', recurso_id="gen_1")
     resultado, recurso = store.idempotencia_iniciar("ws_1", "generate", "clave-1", '{"formato": "flashcards"}')
     assert resultado == "conflicto"
     assert recurso is None
 
 
-def test_idempotencia_duplicada_en_curso_sin_recurso(store):
+def test_idempotencia_duplicada_en_curso_con_recurso_reservado(store):
     """Un reintento mientras la primera intención sigue en curso devuelve
-    'duplicada' con recurso None: el llamador espera/consulta, no crea otro."""
+    'duplicada' con el mismo recurso reservado: no crea otro."""
     cuerpo = "{}"
-    store.idempotencia_iniciar("ws_1", "upload", "clave-up", cuerpo)
+    store.idempotencia_iniciar("ws_1", "upload", "clave-up", cuerpo, recurso_id="doc_1")
     resultado, recurso = store.idempotencia_iniciar("ws_1", "upload", "clave-up", cuerpo)
     assert resultado == "duplicada"
-    assert recurso is None
+    assert recurso == "doc_1"
 
 
 def test_idempotencia_acotada_por_workspace_y_operacion(store):
     """La terna es (workspace, operación, clave): la misma clave en OTRO
     espacio u otra operación es una intención distinta (§7.3)."""
     store.crear_workspace("ws_2", "CODIGO-2", dias_validez=30)
-    assert store.idempotencia_iniciar("ws_1", "generate", "k", "{}")[0] == "creada"
-    assert store.idempotencia_iniciar("ws_2", "generate", "k", "{}")[0] == "creada"  # otro espacio
-    assert store.idempotencia_iniciar("ws_1", "upload", "k", "{}")[0] == "creada"  # otra operación
+    assert store.idempotencia_iniciar("ws_1", "generate", "k", "{}", "gen_1")[0] == "creada"
+    assert store.idempotencia_iniciar("ws_2", "generate", "k", "{}", "gen_2")[0] == "creada"  # otro espacio
+    assert store.idempotencia_iniciar("ws_1", "upload", "k", "{}", "doc_2")[0] == "creada"  # otra operación
 
 
 def test_idempotencia_sobrevive_al_reinicio(ruta_db):
@@ -178,7 +174,7 @@ def test_idempotencia_sobrevive_al_reinicio(ruta_db):
     cuerpo = '{"a": 1}'
     primero = RegistroOperativo(ruta_db)
     primero.crear_workspace("ws_1", "C", dias_validez=30)
-    primero.idempotencia_iniciar("ws_1", "generate", "k", cuerpo)
+    primero.idempotencia_iniciar("ws_1", "generate", "k", cuerpo, recurso_id="gen_9")
     primero.idempotencia_completar("ws_1", "generate", "k", "gen_9")
     primero.cerrar()
 
@@ -199,9 +195,11 @@ def test_la_base_no_guarda_secretos_en_claro(ruta_db):
     registro = RegistroOperativo(ruta_db)
     registro.crear_workspace("ws_1", "CODIGO-DE-RECUPERACION-1234", dias_validez=30)
     registro.crear_sesion("TOKEN-SESION-CLARO", "ws_1", horas_validez=24)
-    registro.idempotencia_completar(
-        "ws_1", "generate", "k", "gen_1", respuesta={"recovery_code": "CODIGO-DE-RECUPERACION-1234"}
-    )  # peor caso: un llamador despistado intenta cachear el código
+    registro.idempotencia_iniciar("ws_1", "generate", "k", "{}", recurso_id="gen_1")
+    with pytest.raises(ValueError, match="credenciales"):
+        registro.idempotencia_completar(
+            "ws_1", "generate", "k", "gen_1", respuesta={"recovery_code": "CODIGO-DE-RECUPERACION-1234"}
+        )
     registro.cerrar()
 
     bytes_crudos = ruta_db.read_bytes()
@@ -262,6 +260,26 @@ def test_borrar_el_espacio_invalida_sesiones_y_filtra_recursos(store):
     assert store.obtener_generacion("gen_1") is None
     assert store.listar_generaciones("ws_1") == []
     assert store.esta_borrado("workspace", "ws_1")
+
+
+def test_borrar_un_documento_retira_sus_derivados_del_listado(store):
+    """§8.5: "borrar un documento retira original, índice, DERIVADOS..." —
+    las generaciones de un documento con lápida no aparecen en el listado
+    del espacio, aunque la generación en sí no tenga lápida propia."""
+    _espacio_de_ejemplo(store)  # doc_1 + gen_1 (de doc_1)
+    store.registrar_documento("doc_2", "ws_1", "Otro manual", DocumentStatus.READY)
+    store.registrar_generacion("gen_2", "ws_1", "doc_2", JobStatus.COMPLETED)
+
+    # Se borra SOLO el documento 1: su derivado (gen_1) se retira del listado;
+    # el del documento 2 sigue visible.
+    store.agendar_borrado("document", "doc_1", "ws_1")
+
+    ids_listados = {generacion["generation_id"] for generacion in store.listar_generaciones("ws_1")}
+    assert ids_listados == {"gen_2"}
+    # La generación retirada del listado tampoco se resuelve individualmente
+    # si el flujo de borrado de #19 le pone lápida propia; sin ella, al menos
+    # el LISTADO ya cumple §8.5 (la lápida propia la decide el orquestador).
+    assert store.obtener_generacion("gen_1") is None  # la lápida del documento también protege la consulta directa
 
 
 # ---------------------------------------------------------------------------
