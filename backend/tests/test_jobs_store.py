@@ -346,13 +346,19 @@ def test_eventos_monotonicos_y_reconexion(store):
 
 
 def test_migraciones_aplican_una_vez(ruta_db):
-    """Abrir dos veces no re-aplica migraciones ni duplica estado."""
+    """Abrir dos veces no re-aplica migraciones ni duplica estado.
+
+    Usa VERSION_ESQUEMA (no un número fijo) para no romperse cada vez que
+    el esquema evoluciona (v2 agregó la tabla jobs del issue #20).
+    """
+    from app.jobs.store import VERSION_ESQUEMA
+
     primero = RegistroOperativo(ruta_db)
-    assert primero.version_esquema() == 1  # VERSION_ESQUEMA actual
+    assert primero.version_esquema() == VERSION_ESQUEMA
     _espacio_de_ejemplo(primero)
     primero.cerrar()
 
     segundo = RegistroOperativo(ruta_db)
-    assert segundo.version_esquema() == 1
+    assert segundo.version_esquema() == VERSION_ESQUEMA
     assert segundo.obtener_workspace("ws_1") is not None  # el estado sigue
     segundo.cerrar()

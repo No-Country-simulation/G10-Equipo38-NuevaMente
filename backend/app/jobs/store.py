@@ -62,7 +62,7 @@ from app.schemas.enums import DocumentStatus, JobStatus
 # Versión actual del esquema. Cada cambio de esquema agrega una entrada a
 # MIGRACIONES y sube este número; NUNCA se edita una migración ya aplicada
 # (las bases reales de los usuarios quedaron con la vieja).
-VERSION_ESQUEMA = 1
+VERSION_ESQUEMA = 2
 
 # Cada migración: (versión, SQL). Se aplican en orden ascendente dentro de
 # una transacción cada una. La v1 crea todas las tablas del issue #08.
@@ -164,6 +164,31 @@ MIGRACIONES: list[tuple[int, str]] = [
         CREATE INDEX idx_sessions_workspace ON sessions(workspace_id);
         CREATE INDEX idx_generations_workspace ON generations(workspace_id);
         CREATE INDEX idx_events_generation ON events(generation_id, id);
+        """,
+    ),
+    (
+        2,
+        """
+        -- Trabajos comunes (issue #20): ingestion, chat y glosario usan el
+        -- MISMO gestor y la misma cola que las generaciones (contratos-api.md);
+        -- status reutiliza los valores JobStatus del contrato (#03) y
+        -- error_code guarda codigos estables (INTERRUPTED, DEADLINE, ...).
+        CREATE TABLE jobs (
+            job_id      TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            tipo        TEXT NOT NULL,
+            status      TEXT NOT NULL CHECK (status IN (
+                'queued', 'running', 'completed', 'rejected_quality', 'failed', 'cancelled')),
+            error_code    TEXT,
+            error_message TEXT,
+            resultado     TEXT,
+            intentos      INTEGER NOT NULL DEFAULT 0,
+            creado_en     TEXT NOT NULL,
+            actualizado_en TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_jobs_workspace ON jobs(workspace_id);
+        CREATE INDEX idx_jobs_cola ON jobs(status, creado_en);
         """,
     ),
 ]
@@ -570,6 +595,116 @@ class RegistroOperativo:
             (workspace_id, ahora, ahora),
         ).fetchall()
         return [dict(fila) for fila in filas]
+
+    # ------------------------------------------------------------------
+    # Trabajos comunes (issue #20): ingestion, chat y glosario
+    # ------------------------------------------------------------------
+
+    def registrar_job(self, job_id: str, workspace_id: str, tipo: str, status: JobStatus = JobStatus.QUEUED) -> None:
+        """Registra un trabajo común en la cola (el gestor de #20 lo consume)."""
+        ahora = _iso(_ahora())
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO jobs (job_id, workspace_id, tipo, status, creado_en, actualizado_en)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (job_id, workspace_id, tipo, status.value, ahora, ahora),
+            )
+
+    def actualizar_job(
+        self,
+        job_id: str,
+        status: JobStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        resultado: str | None = None,
+        incremento_intentos: int = 0,
+    ) -> None:
+        """Transición de estado de un trabajo común (queued→running→terminal).
+
+        `resultado` es JSON serializado por el CALLER (el gestor); acá solo
+        se persiste la cadena — la forma del resultado la define cada tipo
+        de trabajo y se documenta en contratos-api.md.
+        """
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE jobs
+                   SET status = ?, error_code = ?, error_message = ?, resultado = ?,
+                       intentos = intentos + ?, actualizado_en = ?
+                 WHERE job_id = ?
+                """,
+                (status.value, error_code, error_message, resultado, incremento_intentos, _iso(_ahora()), job_id),
+            )
+
+    def obtener_job(self, job_id: str) -> dict | None:
+        """Trabajo solo si existe y su espacio no fue retirado (ownership
+        se resuelve desde la sesión en la capa API, §7.2)."""
+        if self.esta_borrado("workspace", self._workspace_de_job(job_id) or ""):
+            return None
+        fila = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        if fila is None:
+            return None
+        return dict(fila)
+
+    def _workspace_de_job(self, job_id: str) -> str | None:
+        fila = self._conn.execute("SELECT workspace_id FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        return fila["workspace_id"] if fila else None
+
+    def primer_job_encolado(self) -> dict | None:
+        """El trabajo en cola más antiguo del sistema (FIFO global, §7.5).
+
+        La cola es GLOBAL (la ranura intensiva es una sola para todos los
+        espacios y tipos de trabajo), ordenada por momento de llegada.
+        """
+        fila = self._conn.execute(
+            "SELECT * FROM jobs WHERE status = ? ORDER BY creado_en ASC LIMIT 1",
+            (JobStatus.QUEUED.value,),
+        ).fetchone()
+        return dict(fila) if fila else None
+
+    def contar_trabajos_en_cola(self) -> int:
+        """Cuántos trabajos esperan la ranura (para el límite de §7.5)."""
+        fila = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM jobs WHERE status = ?", (JobStatus.QUEUED.value,)
+        ).fetchone()
+        return int(fila["n"])
+
+    def hay_trabajo_activo_global(self) -> bool:
+        """True si la única ranura intensiva está ocupada (§7.5: 1 global)."""
+        fila = self._conn.execute("SELECT 1 FROM jobs WHERE status = ? LIMIT 1", (JobStatus.RUNNING.value,)).fetchone()
+        return fila is not None
+
+    def contar_activos_de_workspace(self, workspace_id: str) -> int:
+        """Trabajos activos (queued o running) del espacio: §7.5 fija 1."""
+        fila = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM jobs WHERE workspace_id = ? AND status IN (?, ?)",
+            (workspace_id, JobStatus.QUEUED.value, JobStatus.RUNNING.value),
+        ).fetchone()
+        return int(fila["n"])
+
+    def marcar_huerfanos_como_interrumpidos(self) -> int:
+        """Trabajos queued que sobrevivieron a su proceso → failed/INTERRUPTED.
+
+        Un trabajo en cola vive en la BASE, pero la FUNCIÓN que lo ejecuta
+        solo existe en la memoria del proceso que lo recibió: tras un
+        reinicio nadie puede ejecutarlo. Igual que los running (§7.2), se
+        marcan fallidos con causa visible; el usuario reintenta y la
+        Idempotency-Key (§7.3) evita duplicar el efecto.
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE jobs
+                   SET status = ?, error_code = 'INTERRUPTED',
+                       error_message = 'El proceso que acepto el trabajo se reinicio.',
+                       actualizado_en = ?
+                 WHERE status = ?
+                """,
+                (JobStatus.FAILED.value, _iso(_ahora()), JobStatus.QUEUED.value),
+            )
+            return cursor.rowcount
 
     # ------------------------------------------------------------------
     # Idempotencia (§7.3): el corazón atómico del issue

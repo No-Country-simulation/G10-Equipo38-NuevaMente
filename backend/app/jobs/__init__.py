@@ -9,8 +9,13 @@ Mapa del paquete:
   idempotencia atómica por workspace+operación+clave (§7.3), recuperación
   tras reinicio (running->failed/INTERRUPTED, §7.2) y tombstones de borrado
   (§8.5). Es la persistencia que el resto del paquete consume.
-- manager.py: gestor de la cola con GLOBAL_HEAVY_JOB_CONCURRENCY,
-  MAX_QUEUED_JOBS y GENERATION_DEADLINE_SECONDS del Apéndice A (issue #20).
+- manager.py (issue #20, implementado): GestorTrabajos con worker dedicado
+  (14.2), ranura global 1 + cola <=5 + 1 por espacio, deadline y espera
+  maxima de 7.5, cancelacion cooperativa, reintentos con backoff+jitter y
+  CuotasProveedor RPM/TPM/RPD por modelo contando reintentos. La tabla
+  `jobs` (migracion v2 del store) persiste estados/resultados y los eventos
+  alimentan el SSE de #31. Los endpoints HTTP llegan con #31/#19 junto a
+  las sesiones de #9 (contratos-api exige autenticacion y ownership).
 
 Regla transversal (§14.2): un único proceso escritor; los trabajos
 interrumpidos se identifican como fallidos, nunca completados. La
