@@ -54,6 +54,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from math import isfinite
 from typing import Callable
 
 # --------------------------------------------------------------------------
@@ -157,28 +158,57 @@ class VerificadorFidelidad:
         """
         resultado = ResultadoFidelidad(estado=EstadoEvaluacion.NO_EVALUABLE, score=None)
         resultado.no_juzgados_etiquetados = list(segmentos_etiquetados or [])
+        if not texto.strip() or not contexto.strip():
+            resultado.diagnostico = "Falta contenido o evidencia para evaluar."
+            return resultado
+        # El llamador identifica segmentos completos; retirar solo esa ocurrencia,
+        # conservando hechos repetidos en otras partes del contenido educativo.
+        for segmento in [*(distractores or []), *(segmentos_etiquetados or [])]:
+            if segmento.strip():
+                texto = texto.replace(segmento, "", 1)
+        if not texto.strip():
+            resultado.diagnostico = "No quedan afirmaciones educativas fuera de los segmentos excluidos."
+            return resultado
 
         # ---- Paso 1: descomposición (falla => fallo técnico) ----
         try:
             afirmaciones = self._descomponer(texto)
-        except Exception as error:  # noqa: BLE001 - la dependencia no dicta el veredicto
+        except Exception:  # noqa: BLE001 - la dependencia no dicta el veredicto
             resultado.estado = EstadoEvaluacion.FALLO_TECNICO
-            resultado.diagnostico = f"El descompositor fallo: {error}"
+            resultado.diagnostico = "El descompositor falló; reintentar la evaluación."
             return resultado
 
+        if not isinstance(afirmaciones, list) or any(
+            not isinstance(a, Afirmacion)
+            or not isinstance(a.id, str)
+            or not a.id.strip()
+            or not isinstance(a.texto, str)
+            or not a.texto.strip()
+            for a in afirmaciones
+        ):
+            resultado.diagnostico = "La descomposición no respeta el contrato de afirmaciones."
+            return resultado
+        if len({a.id for a in afirmaciones}) != len(afirmaciones):
+            resultado.diagnostico = "La descomposición contiene IDs duplicados."
+            return resultado
         if not afirmaciones:
             # Sin afirmaciones no hay fidelidad que medir: score NULO
             # (§19.1: "una salida vacía no recibe 1.0").
             resultado.diagnostico = "El contenido no contiene afirmaciones evaluables."
             return resultado
         resultado.afirmaciones = list(afirmaciones)
+        resultado.total = len(afirmaciones)
 
         # ---- Paso 2: juicio NLI contra el contexto ----
         try:
-            juicios = self._juzgar(afirmaciones, contexto)
-        except Exception as error:  # noqa: BLE001
+            juicios = self._juzgar(list(afirmaciones), contexto)
+        except Exception:  # noqa: BLE001
             resultado.estado = EstadoEvaluacion.FALLO_TECNICO
-            resultado.diagnostico = f"El juez NLI fallo: {error}"
+            resultado.diagnostico = "El juez NLI falló; reintentar la evaluación."
+            return resultado
+
+        if not _juicios_validos(juicios):
+            resultado.diagnostico = "El juez devolvió juicios inválidos; se exigen veredictos booleanos."
             return resultado
 
         # ---- Validación de completitud (§19.1: el corazón de la honestidad) ----
@@ -212,10 +242,17 @@ class VerificadorFidelidad:
         for distracto in distractores or []:
             try:
                 juicios_distractor = self._juzgar([Afirmacion(id="distractor", texto=distracto)], contexto)
-            except Exception as error:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 # El fallo del juez sobre un distractor no invalida el score
                 # principal, pero se reporta para que #28 lo vea.
-                resultado.hallazgos.append(f"No se pudo comprobar un distractor: {error}")
+                resultado.hallazgos.append("No se pudo comprobar un distractor por fallo del juez.")
+                continue
+            if (
+                not _juicios_validos(juicios_distractor)
+                or len(juicios_distractor) != 1
+                or juicios_distractor[0].id_afirmacion != "distractor"
+            ):
+                resultado.hallazgos.append("Evaluación incompleta o inválida de un distractor; bloquea aprobación.")
                 continue
             if juicios_distractor and juicios_distractor[0].respaldada:
                 resultado.hallazgos.append(
@@ -223,6 +260,19 @@ class VerificadorFidelidad:
                     "el quiz tendria mas de una respuesta correcta."
                 )
         return resultado
+
+
+def _juicios_validos(juicios) -> bool:
+    return isinstance(juicios, list) and all(
+        isinstance(j, Juicio)
+        and isinstance(j.id_afirmacion, str)
+        and bool(j.id_afirmacion.strip())
+        and type(j.respaldada) is bool
+        and isinstance(j.motivo, str)
+        and isinstance(j.referencias, tuple)
+        and all(isinstance(r, str) and bool(r.strip()) for r in j.referencias)
+        for j in juicios
+    )
 
 
 def distractor_corto(texto: str, largo: int = 60) -> str:
@@ -251,6 +301,8 @@ class FranjaAprobacion(str, Enum):
 
 def franja_de_aprobacion(score: float) -> FranjaAprobacion:
     """Traduce un score evaluabile a su banda de §19.3 (función pura)."""
+    if type(score) not in (int, float) or not isfinite(score) or not 0 <= score <= 1:
+        raise ValueError("El score debe ser un número finito entre 0 y 1")
     if score < 0.70:
         return FranjaAprobacion.REHACER
     if score < 0.85:

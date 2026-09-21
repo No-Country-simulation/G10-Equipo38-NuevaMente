@@ -37,6 +37,79 @@ from fixtures.factuales import CASOS_FACTUALES
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.mark.parametrize(
+    "afirmaciones",
+    [None, ["texto"], [Afirmacion("", "A")], [Afirmacion("a", "A"), Afirmacion("a", "B")], [Afirmacion("a", " ")]],
+)
+def test_descomposicion_malformada_no_produce_score(afirmaciones):
+    resultado = VerificadorFidelidad(lambda t: afirmaciones, lambda a, c: []).verificar("contenido", "fuente")
+    assert resultado.estado is EstadoEvaluacion.NO_EVALUABLE
+    assert resultado.score is None
+
+
+@pytest.mark.parametrize("juicios", [None, ["texto"], [Juicio("a", "false")], [Juicio("a", 1)]])
+def test_juicios_exigen_booleanos_reales(juicios):
+    resultado = VerificadorFidelidad(lambda t: [Afirmacion("a", "A")], lambda a, c: juicios).verificar("A", "A")
+    assert resultado.score is None
+
+
+def test_juez_no_puede_modificar_el_denominador():
+    def juez(afirmaciones, contexto):
+        afirmaciones.pop()
+        return [Juicio("a", True)]
+
+    verificador = VerificadorFidelidad(lambda t: [Afirmacion("a", "A"), Afirmacion("b", "B")], juez)
+    resultado = verificador.verificar("A y B", "A")
+    assert resultado.score is None
+    assert resultado.total == 2
+    assert len(resultado.afirmaciones) == 2
+
+
+def test_exclusiones_se_aplican_antes_de_descomponer():
+    entradas = []
+
+    def descomponer(texto):
+        entradas.append(texto)
+        return [Afirmacion("a", texto.strip())]
+
+    def juzgar(afirmaciones, contexto):
+        return [Juicio(a.id, a.id != "distractor") for a in afirmaciones]
+
+    resultado = VerificadorFidelidad(descomponer, juzgar).verificar(
+        "Hecho real.\nOpción falsa.\nAnalogía ficticia.",
+        "Hecho real.",
+        distractores=["Opción falsa."],
+        segmentos_etiquetados=["Analogía ficticia."],
+    )
+    assert entradas[0].strip() == "Hecho real."
+    assert resultado.score == 1.0 and not resultado.hallazgos
+
+
+@pytest.mark.parametrize("salida", [[], [Juicio("id_inventado", False)], [Juicio("distractor", "false")]])
+def test_distractor_sin_veredicto_valido_bloquea_aprobacion(salida):
+    def juez(afirmaciones, contexto):
+        return salida if afirmaciones[0].id == "distractor" else [Juicio("a", True)]
+
+    resultado = VerificadorFidelidad(lambda t: [Afirmacion("a", "A")], juez).verificar("A", "A", distractores=["B"])
+    assert resultado.score == 1.0  # La comprobación aparte no altera el denominador.
+    assert resultado.hallazgos
+
+
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), -0.1, 1.1, True, None])
+def test_franja_no_acepta_scores_invalidos(score):
+    with pytest.raises(ValueError):
+        franja_de_aprobacion(score)
+
+
+@pytest.mark.parametrize("texto,contexto", [("", "fuente"), ("contenido", " ")])
+def test_no_se_evaluan_entradas_vacias(texto, contexto):
+    def no_llamar(*args):
+        pytest.fail("No debe consumir una llamada sin entrada o evidencia")
+
+    assert VerificadorFidelidad(no_llamar, no_llamar).verificar(texto, contexto).score is None
+
+
 CONTEXTO_VCN = (
     "Una VCN es la red privada que aísla los recursos en OCI. Las subredes públicas enrutan "
     "0.0.0.0/0 hacia el Internet Gateway. El NAT Gateway da salida a Internet sin exponer IP públicas."
@@ -186,7 +259,8 @@ def test_excepcion_del_juez_es_fallo_tecnico_no_veredicto():
     resultado = verificador.verificar("c", CONTEXTO_VCN)
     assert resultado.estado is EstadoEvaluacion.FALLO_TECNICO
     assert resultado.score is None
-    assert "proveedor caído" in resultado.diagnostico
+    assert "juez NLI" in resultado.diagnostico
+    assert "proveedor caído" not in resultado.diagnostico
 
 
 def test_excepcion_del_descompositor_es_fallo_tecnico():
