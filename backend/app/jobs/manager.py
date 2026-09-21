@@ -70,6 +70,9 @@ from typing import Any, Callable
 from app.jobs.store import RegistroOperativo
 from app.schemas.enums import JobStatus
 
+_GESTORES_ACTIVOS: dict[str, object] = {}
+_GUARDIA_GESTORES = threading.Lock()
+
 
 class ColaLlenaError(RuntimeError):
     """La cola alcanzó MAX_QUEUED_JOBS: la API lo traduce a 429 QUEUE_FULL.
@@ -107,6 +110,10 @@ class TrabajoCanceladoError(Exception):
     """
 
 
+class RechazoCalidadError(Exception):
+    """El Critic agotó las revisiones sin aprobar; no es un fallo técnico."""
+
+
 class ReintentableError(Exception):
     """Error TRANSITORIO (red, 5xx del proveedor): reintenta con backoff.
 
@@ -114,6 +121,10 @@ class ReintentableError(Exception):
     Los errores PERMANENTES (validación, lógica) deben usar excepciones
     normales: reintentarlos solo quema presupuesto.
     """
+
+    def __init__(self, mensaje: str, retry_after: float | None = None) -> None:
+        super().__init__(mensaje)
+        self.retry_after = retry_after
 
 
 class CuotaAgotadaError(RuntimeError):
@@ -166,33 +177,35 @@ class CuotasProveedor:
         dos hilos no pueden colarse dentro de la misma ventana.
         """
         ahora = time.monotonic()
+        if tokens_estimados < 0:
+            raise ValueError("tokens_estimados no puede ser negativo")
         hoy = datetime.now(timezone.utc).date().isoformat()
         with self._lock:
             cuotas = self._cuotas.get(modelo)
             if cuotas is None:
                 # Sin límite configurado para el modelo: cuenta, no bloquea.
-                return
+                raise CuotaAgotadaError(f"Falta configurar cuotas para el modelo {modelo}")
 
             ventana_llamadas = self._llamadas.setdefault(modelo, deque())
             while ventana_llamadas and ahora - ventana_llamadas[0] > 60:
                 ventana_llamadas.popleft()
-            ventana_llamadas.append(ahora)
-            if len(ventana_llamadas) > cuotas.rpm:
+            if len(ventana_llamadas) >= cuotas.rpm:
                 raise CuotaAgotadaError(f"Cuota RPM agotada para {modelo} ({cuotas.rpm}/min)")
 
             ventana_tokens = self._tokens.setdefault(modelo, deque())
             while ventana_tokens and ahora - ventana_tokens[0][0] > 60:
                 ventana_tokens.popleft()
-            ventana_tokens.append((ahora, tokens_estimados))
-            total_tokens = sum(t for _, t in ventana_tokens)
+            total_tokens = sum(t for _, t in ventana_tokens) + tokens_estimados
             if total_tokens > cuotas.tpm:
                 raise CuotaAgotadaError(f"Cuota TPM agotada para {modelo} ({cuotas.tpm} tokens/min)")
 
             fecha, conteo = self._llamadas_dia.get(modelo, (hoy, 0))
             conteo = conteo + 1 if fecha == hoy else 1
-            self._llamadas_dia[modelo] = (hoy, conteo)
             if conteo > cuotas.rpd:
                 raise CuotaAgotadaError(f"Cuota diaria (RPD) agotada para {modelo} ({cuotas.rpd}/dia)")
+            ventana_llamadas.append(ahora)
+            ventana_tokens.append((ahora, tokens_estimados))
+            self._llamadas_dia[modelo] = (hoy, conteo)
 
     def disponibles_hoy(self, modelo: str) -> int | None:
         """Cuántas llamadas quedan hoy para el modelo (None si no está
@@ -225,6 +238,9 @@ class ContextoEjecucion:
     workspace_id: str
     tipo: str
     deadline: float  # time.monotonic() límite de EJECUCIÓN
+    timeout_por_llamada: float = 60.0
+    cuotas: CuotasProveedor | None = field(default=None, repr=False)
+    espacio_vigente: Callable[[], bool] = field(default=lambda: True, repr=False)
     _evento_cancelacion: threading.Event = field(repr=False, default_factory=threading.Event)
 
     def cancelado(self) -> bool:
@@ -232,10 +248,28 @@ class ContextoEjecucion:
 
     def chequear(self) -> None:
         """Helper para usar entre pasos: levanta la excepción que corresponde."""
-        if self.cancelado():
+        if self.cancelado() or not self.espacio_vigente():
             raise TrabajoCanceladoError()
         if time.monotonic() > self.deadline:
             raise DeadlineExcedidoError()
+
+    def llamar(self, funcion: Callable[..., Any], *, modelo: str, tokens_estimados: int = 0) -> Any:
+        """Reserva cuota; el adaptador debe aplicar timeout al SDK/HTTP.
+
+        La llamada conserva la ranura hasta retornar aunque se cancele.
+        Cada intento del proveedor debe pasar por este método.
+        """
+        self.chequear()
+        if self.cuotas is None:
+            raise CuotaAgotadaError("No hay cuotas configuradas")
+        self.cuotas.permitir(modelo, tokens_estimados)
+        timeout = min(self.timeout_por_llamada, self.deadline - time.monotonic())
+        inicio = time.monotonic()
+        resultado = funcion(timeout=timeout)
+        self.chequear()
+        if time.monotonic() - inicio > timeout:
+            raise ReintentableError("La llamada excedió su timeout")
+        return resultado
 
 
 @dataclass(frozen=True)
@@ -286,9 +320,19 @@ class GestorTrabajos:
         self._activo = True
         # Reinicio (§7.2/§14.2): nadie ejecutará los queued que sobrevivieron
         # a otro proceso. Marcarlos y que la idempotencia del caller resuelva.
-        self.store.marcar_huerfanos_como_interrumpidos()
-        self._hilo = threading.Thread(target=self._ciclo_worker, name="gestor-trabajos", daemon=True)
-        self._hilo.start()
+        self._registro_id = str(store.ruta_db.resolve())
+        with _GUARDIA_GESTORES:
+            if self._registro_id in _GESTORES_ACTIVOS:
+                raise RuntimeError("Ya existe un gestor para este registro")
+            _GESTORES_ACTIVOS[self._registro_id] = self
+        try:
+            self.store.marcar_huerfanos_como_interrumpidos()
+            self._hilo = threading.Thread(target=self._ciclo_worker, name="gestor-trabajos", daemon=True)
+            self._hilo.start()
+        except Exception:
+            with _GUARDIA_GESTORES:
+                _GESTORES_ACTIVOS.pop(self._registro_id, None)
+            raise
 
     # ------------------------------------------------------------------
     # API del gestor (la usan los endpoints de #19/#31)
@@ -308,6 +352,10 @@ class GestorTrabajos:
         mismo), después si la cola global está llena (tiene que esperar).
         """
         with self._lock:
+            if not self._activo:
+                raise RuntimeError("El gestor está detenido")
+            if self.store.obtener_workspace(workspace_id) is None:
+                raise ValueError("El espacio no está disponible")
             activos = self.store.contar_activos_de_workspace(workspace_id)
             if activos >= 1:
                 raise EspacioOcupadoError(workspace_id)
@@ -328,12 +376,14 @@ class GestorTrabajos:
     def estado(self, job_id: str) -> dict | None:
         """Consulta del trabajo (GET /api/jobs/{id} de #31): estado, error y
         posición si sigue en cola."""
-        trabajo = self.store.obtener_job(job_id)
+        with self._lock:
+            self._barrer_cola_expirada()
+            trabajo = self.store.obtener_job(job_id)
         if trabajo is None:
             return None
         if trabajo["status"] == JobStatus.QUEUED.value:
-            delante = self.store.contar_trabajos_en_cola()  # FIFO global aproximada
-            trabajo["posicion_cola"] = max(delante, 1)
+            cola = self.store.listar_jobs_encolados()
+            trabajo["posicion_cola"] = next((i for i, j in enumerate(cola, 1) if j["job_id"] == job_id), None)
         return trabajo
 
     def cancelar(self, job_id: str) -> bool:
@@ -359,9 +409,17 @@ class GestorTrabajos:
     def detener(self) -> None:
         """Apaga el worker (tests y cierre del proceso). Los trabajos running
         al morir el proceso quedan failed/INTERRUPTED vía #8."""
-        self._activo = False
+        with self._lock:
+            self._activo = False
+            for evento in self._cancelaciones.values():
+                evento.set()
         self._despertar.set()
         self._hilo.join(timeout=5)
+        if self._hilo.is_alive():
+            raise RuntimeError("Hay una llamada en vuelo; no cerrar el store hasta que termine")
+        with _GUARDIA_GESTORES:
+            if _GESTORES_ACTIVOS.get(self._registro_id) is self:
+                del _GESTORES_ACTIVOS[self._registro_id]
 
     # ------------------------------------------------------------------
     # Worker interno
@@ -376,11 +434,15 @@ class GestorTrabajos:
         while self._activo:
             self._despertar.wait(timeout=1.0)
             self._despertar.clear()
-            self._barrer_cola_expirada()
-            siguiente = self.store.primer_job_encolado()
+            if not self._activo:
+                break
+            with self._lock:
+                self._barrer_cola_expirada()
+                siguiente = self.store.primer_job_encolado()
             if siguiente is None:
                 continue
             self._ejecutar(siguiente)
+            self._despertar.set()  # Consumir inmediatamente los trabajos que ya esperan.
 
     def _barrer_cola_expirada(self) -> None:
         """Trabajos que esperaron más de la cuenta: failed/COLA_EXPIRADA."""
@@ -396,14 +458,7 @@ class GestorTrabajos:
                 )
 
     def _trabajos_encolados(self) -> list[dict]:
-        with self._lock:
-            return [
-                dict(fila)
-                for fila in self.store._conn.execute(
-                    "SELECT * FROM jobs WHERE status = ? ORDER BY creado_en ASC",
-                    (JobStatus.QUEUED.value,),
-                ).fetchall()
-            ]
+        return self.store.listar_jobs_encolados()
 
     def _ejecutar(self, trabajo: dict) -> None:
         """Corre UN trabajo con deadline, reintentos y cancelación."""
@@ -411,21 +466,29 @@ class GestorTrabajos:
         workspace_id = trabajo["workspace_id"]
 
         with self._lock:
+            actual = self.store.obtener_job(job_id)
+            if actual is None:
+                self._finalizar(job_id, JobStatus.CANCELLED, "El espacio fue retirado.")
+                return
+            if actual["status"] != JobStatus.QUEUED.value:
+                return
             funcion = self._ejecutables.get(job_id)
             evento_cancelacion = self._cancelaciones.get(job_id, threading.Event())
+            self.store.actualizar_job(job_id, JobStatus.RUNNING)
+            self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.RUNNING, job_id=job_id)
         if funcion is None:
             # Ejecutable perdido (no debería pasar: el mismo proceso lo encoló).
             self._finalizar(job_id, JobStatus.FAILED, "El trabajo perdió su ejecutable.", error_code="ORFANO")
             return
-
-        self.store.actualizar_job(job_id, JobStatus.RUNNING)
-        self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.RUNNING, job_id=job_id)
 
         contexto = ContextoEjecucion(
             job_id=job_id,
             workspace_id=workspace_id,
             tipo=trabajo["tipo"],
             deadline=time.monotonic() + self.controles.deadline_ejecucion_segundos,
+            timeout_por_llamada=self.controles.timeout_por_llamada_segundos,
+            cuotas=self.cuotas,
+            espacio_vigente=lambda: self.store.obtener_workspace(workspace_id) is not None,
             _evento_cancelacion=evento_cancelacion,
         )
 
@@ -433,14 +496,18 @@ class GestorTrabajos:
         while True:
             intento += 1
             try:
+                contexto.chequear()
                 resultado = funcion(contexto)
-                self._finalizar(job_id, JobStatus.COMPLETED, resultado=_serializar(resultado))
-                self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.COMPLETED, job_id=job_id)
+                with self._lock:
+                    contexto.chequear()
+                    self._finalizar(job_id, JobStatus.COMPLETED, resultado=_serializar(resultado))
                 self._limpiar(job_id)
+                return
+            except RechazoCalidadError:
+                self._finalizar(job_id, JobStatus.REJECTED_QUALITY, "El contenido no superó la revisión de calidad.")
                 return
             except TrabajoCanceladoError:
                 self._finalizar(job_id, JobStatus.CANCELLED, "Cancelado por el usuario durante la ejecución.")
-                self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.CANCELLED, job_id=job_id)
                 self._limpiar(job_id)
                 return
             except DeadlineExcedidoError:
@@ -450,14 +517,12 @@ class GestorTrabajos:
                     f"El trabajo excedió el deadline de {self.controles.deadline_ejecucion_segundos:.0f} s de ejecución.",
                     error_code="DEADLINE",
                 )
-                self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.FAILED, job_id=job_id)
                 self._limpiar(job_id)
                 return
             except CuotaAgotadaError as error:
                 # "La cuota diaria agotada detiene nuevas llamadas": falla el
                 # trabajo con causa técnica, sin ciclar reintentos (§7.5).
                 self._finalizar(job_id, JobStatus.FAILED, str(error), error_code="CUOTA_AGOTADA")
-                self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.FAILED, job_id=job_id)
                 self._limpiar(job_id)
                 return
             except ReintentableError as error:
@@ -465,24 +530,23 @@ class GestorTrabajos:
                     self._finalizar(
                         job_id,
                         JobStatus.FAILED,
-                        f"Error transitorio tras {intento} intentos: {error}",
+                        f"Error transitorio tras {intento} intentos.",
                         error_code="REINTENTOS_AGOTADOS",
                     )
-                    self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.FAILED, job_id=job_id)
                     self._limpiar(job_id)
                     return
                 # Backoff exponencial + jitter (±25%): 2^{-}? base*2^intento con
                 # componente aleatorio para no sincronizar reintentos (§7.5).
                 pausa = self.controles.base_backoff_segundos * (2 ** (intento - 1))
                 pausa *= random.uniform(0.75, 1.25)
-                evento_cancelacion.wait(timeout=min(pausa, self.controles.timeout_por_llamada_segundos))
+                pausa = max(pausa, error.retry_after or 0)
+                evento_cancelacion.wait(timeout=min(pausa, max(0, contexto.deadline - time.monotonic())))
                 self.store.actualizar_job(job_id, JobStatus.RUNNING, incremento_intentos=1)
                 continue
-            except Exception as error:  # noqa: BLE001 - el worker nunca debe morir
+            except Exception:  # noqa: BLE001 - el worker nunca debe morir
                 # Error PERMANENTE: sin reintento (reintentar validaciones no
                 # tiene sentido) y sin tragar la causa: queda en el registro.
-                self._finalizar(job_id, JobStatus.FAILED, f"Error del trabajo: {error}", error_code="ERROR_TRABAJO")
-                self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.FAILED, job_id=job_id)
+                self._finalizar(job_id, JobStatus.FAILED, "Error interno del trabajo.", error_code="ERROR_TRABAJO")
                 self._limpiar(job_id)
                 return
 
@@ -495,7 +559,7 @@ class GestorTrabajos:
         resultado: str | None = None,
     ) -> None:
         with self._lock:
-            self.store.actualizar_job(job_id, status, error_code=error_code, error_message=mensaje, resultado=resultado)
+            self.store.finalizar_job(job_id, status, error_code=error_code, error_message=mensaje, resultado=resultado)
             self._limpiar(job_id)
 
     def _limpiar(self, job_id: str) -> None:

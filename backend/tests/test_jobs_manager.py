@@ -45,6 +45,122 @@ from app.schemas.enums import JobStatus
 
 pytestmark = pytest.mark.unit
 
+
+def test_cancelar_durante_llamada_sin_chequeos_no_publica(gestor, store):
+    liberar = threading.Event()
+    job = gestor.enqueue("ws_a", "chat", lambda ctx: liberar.wait(2) or "resultado")
+    esperarlo(store, job, JobStatus.RUNNING)
+    gestor.cancelar(job)
+    liberar.set()
+    assert esperarlo(store, job, JobStatus.CANCELLED)["resultado"] is None
+
+
+def test_deadline_se_valida_al_retornar_sin_chequeos(store):
+    gestor = GestorTrabajos(store, ControlesOperativos(deadline_ejecucion_segundos=0.01))
+    try:
+        job = gestor.enqueue("ws_a", "chat", lambda ctx: time.sleep(0.03) or "tardío")
+        assert esperarlo(store, job, JobStatus.FAILED)["error_code"] == "DEADLINE"
+    finally:
+        gestor.detener()
+
+
+def test_posiciones_fifo_distintas_y_evento_de_cancelacion(gestor, store):
+    liberar = threading.Event()
+    job = gestor.enqueue("ws_a", "chat", lambda ctx: liberar.wait(2))
+    esperarlo(store, job, JobStatus.RUNNING)
+    store.crear_workspace("ws_c", "C", 30)
+    segundo = gestor.enqueue("ws_b", "chat", lambda ctx: "ok")
+    tercero = gestor.enqueue("ws_c", "chat", lambda ctx: "ok")
+    assert gestor.estado(segundo)["posicion_cola"] == 1
+    assert gestor.estado(tercero)["posicion_cola"] == 2
+    gestor.cancelar(segundo)
+    assert (
+        store._conn.execute("SELECT status FROM events WHERE job_id=? ORDER BY id DESC", (segundo,)).fetchone()[0]
+        == "cancelled"
+    )
+    liberar.set()
+
+
+def test_reinicio_recupera_running(store):
+    store.registrar_job("interrumpido", "ws_a", "chat", JobStatus.RUNNING)
+    gestor = GestorTrabajos(store)
+    try:
+        assert store.obtener_job("interrumpido")["error_code"] == "INTERRUPTED"
+    finally:
+        gestor.detener()
+
+
+def test_segundo_gestor_no_roba_trabajos_del_primero(gestor, store):
+    with pytest.raises(RuntimeError, match="Ya existe"):
+        GestorTrabajos(store)
+
+
+def test_rechazo_de_calidad_no_publica_ni_se_confunde_con_fallo(gestor, store):
+    from app.jobs.manager import RechazoCalidadError
+
+    def rechazar(ctx):
+        raise RechazoCalidadError()
+
+    job = gestor.enqueue("ws_a", "generacion", rechazar)
+    assert esperarlo(store, job, JobStatus.REJECTED_QUALITY)["resultado"] is None
+
+
+def test_cola_se_drena_sin_espera_artificial(gestor, store):
+    liberar = threading.Event()
+    primero = gestor.enqueue("ws_a", "chat", lambda ctx: liberar.wait(2))
+    esperarlo(store, primero, JobStatus.RUNNING)
+    segundo = gestor.enqueue("ws_b", "chat", lambda ctx: "ok")
+    liberar.set()
+    esperarlo(store, segundo, JobStatus.COMPLETED, plazo=0.5)
+
+
+def test_rechazos_de_cuota_no_consumen_presupuesto():
+    cuotas = CuotasProveedor({"m": CuotasModelo(rpm=1, tpm=10, rpd=2)})
+    with pytest.raises(CuotaAgotadaError):
+        cuotas.permitir("m", 11)
+    cuotas.permitir("m", 5)
+    assert cuotas.disponibles_hoy("m") == 1
+    with pytest.raises(ValueError):
+        cuotas.permitir("m", -1)
+    with pytest.raises(CuotaAgotadaError):
+        cuotas.permitir("sin-configurar")
+
+
+def test_retry_after_no_se_recorta(store):
+    gestor = GestorTrabajos(store, ControlesOperativos(deadline_ejecucion_segundos=0.1))
+    intentos = []
+    try:
+
+        def trabajo(ctx):
+            intentos.append(1)
+            raise ReintentableError("esperar", retry_after=10)
+
+        job = gestor.enqueue("ws_a", "chat", trabajo)
+        assert esperarlo(store, job, JobStatus.FAILED)["error_code"] == "DEADLINE"
+        assert len(intentos) == 1
+    finally:
+        gestor.detener()
+
+
+def test_llamadas_reciben_timeout_y_reservan_cuota():
+    cuotas = CuotasProveedor({"m": CuotasModelo(rpd=1)})
+    ctx = ContextoEjecucion("job", "ws", "chat", time.monotonic() + 30, timeout_por_llamada=0.2, cuotas=cuotas)
+    assert ctx.llamar(lambda *, timeout: timeout, modelo="m") == 0.2
+    with pytest.raises(CuotaAgotadaError):
+        ctx.llamar(lambda *, timeout: "no llega", modelo="m")
+
+
+def test_borrado_durante_llamada_descarta_resultado(gestor, store):
+    liberar = threading.Event()
+    job = gestor.enqueue("ws_a", "chat", lambda ctx: liberar.wait(2) or "privado")
+    esperarlo(store, job, JobStatus.RUNNING)
+    store.borrar_workspace("ws_a")
+    liberar.set()
+    gestor.detener()
+    fila = store._conn.execute("SELECT status, resultado FROM jobs WHERE job_id=?", (job,)).fetchone()
+    assert fila["status"] == "cancelled" and fila["resultado"] is None
+
+
 # Controles acelerados: mismos CAMINOS de código que producción (300 s),
 # con plazos que hacen cada test casi instantáneo.
 CONTROLES_RAPIDOS = ControlesOperativos(

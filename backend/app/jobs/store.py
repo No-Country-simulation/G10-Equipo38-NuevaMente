@@ -638,20 +638,23 @@ class RegistroOperativo:
                 (status.value, error_code, error_message, resultado, incremento_intentos, _iso(_ahora()), job_id),
             )
 
+    @_sincronizado
     def obtener_job(self, job_id: str) -> dict | None:
         """Trabajo solo si existe y su espacio no fue retirado (ownership
         se resuelve desde la sesión en la capa API, §7.2)."""
-        if self.esta_borrado("workspace", self._workspace_de_job(job_id) or ""):
+        if self.obtener_workspace(self._workspace_de_job(job_id) or "") is None:
             return None
         fila = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         if fila is None:
             return None
         return dict(fila)
 
+    @_sincronizado
     def _workspace_de_job(self, job_id: str) -> str | None:
         fila = self._conn.execute("SELECT workspace_id FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         return fila["workspace_id"] if fila else None
 
+    @_sincronizado
     def primer_job_encolado(self) -> dict | None:
         """El trabajo en cola más antiguo del sistema (FIFO global, §7.5).
 
@@ -664,6 +667,7 @@ class RegistroOperativo:
         ).fetchone()
         return dict(fila) if fila else None
 
+    @_sincronizado
     def contar_trabajos_en_cola(self) -> int:
         """Cuántos trabajos esperan la ranura (para el límite de §7.5)."""
         fila = self._conn.execute(
@@ -671,11 +675,13 @@ class RegistroOperativo:
         ).fetchone()
         return int(fila["n"])
 
+    @_sincronizado
     def hay_trabajo_activo_global(self) -> bool:
         """True si la única ranura intensiva está ocupada (§7.5: 1 global)."""
         fila = self._conn.execute("SELECT 1 FROM jobs WHERE status = ? LIMIT 1", (JobStatus.RUNNING.value,)).fetchone()
         return fila is not None
 
+    @_sincronizado
     def contar_activos_de_workspace(self, workspace_id: str) -> int:
         """Trabajos activos (queued o running) del espacio: §7.5 fija 1."""
         fila = self._conn.execute(
@@ -683,6 +689,31 @@ class RegistroOperativo:
             (workspace_id, JobStatus.QUEUED.value, JobStatus.RUNNING.value),
         ).fetchone()
         return int(fila["n"])
+
+    @_sincronizado
+    def listar_jobs_encolados(self) -> list[dict]:
+        return [
+            dict(fila)
+            for fila in self._conn.execute(
+                "SELECT * FROM jobs WHERE status = ? ORDER BY creado_en, rowid", (JobStatus.QUEUED.value,)
+            ).fetchall()
+        ]
+
+    @_sincronizado
+    def finalizar_job(self, job_id: str, status: JobStatus, **datos) -> None:
+        """Publica estado y evento juntos, sin reabrir trabajos terminales ni espacios borrados."""
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            fila = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+            if fila and fila["status"] in (JobStatus.QUEUED.value, JobStatus.RUNNING.value):
+                if status == JobStatus.COMPLETED and self.obtener_workspace(fila["workspace_id"]) is None:
+                    status, datos = JobStatus.CANCELLED, {"error_message": "El espacio fue retirado."}
+                self.actualizar_job(job_id, status, **datos)
+                self.registrar_evento(fila["workspace_id"], fila["tipo"], status, job_id=job_id)
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def marcar_huerfanos_como_interrumpidos(self) -> int:
         """Trabajos queued que sobrevivieron a su proceso → failed/INTERRUPTED.
@@ -700,9 +731,9 @@ class RegistroOperativo:
                    SET status = ?, error_code = 'INTERRUPTED',
                        error_message = 'El proceso que acepto el trabajo se reinicio.',
                        actualizado_en = ?
-                 WHERE status = ?
+                 WHERE status IN (?, ?)
                 """,
-                (JobStatus.FAILED.value, _iso(_ahora()), JobStatus.QUEUED.value),
+                (JobStatus.FAILED.value, _iso(_ahora()), JobStatus.QUEUED.value, JobStatus.RUNNING.value),
             )
             return cursor.rowcount
 
