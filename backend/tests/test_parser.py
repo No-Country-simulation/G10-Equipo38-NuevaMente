@@ -29,6 +29,45 @@ from app.core.rag.parser import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("contenido", [b"", b" \n\t", b"\xef\xbb\xbf", b"texto\x01binario"])
+def test_rechaza_texto_vacio_o_controles_binarios(contenido):
+    with pytest.raises(ParserError):
+        parsear_archivo(contenido, "archivo.txt")
+
+
+def test_markdown_conserva_preambulo_y_bloques_de_codigo():
+    texto = "Introducción importante\n# Tema\n```python\n# comentario\nprint(1)\n```\nFin"
+    resultado = parsear_archivo(texto.encode(), "manual.md")
+    assert [s.titulo for s in resultado.secciones] == ["(introducción)", "Tema"]
+    assert resultado.secciones[0].texto == "Introducción importante"
+    assert "# comentario" in resultado.secciones[1].texto
+
+
+def test_pdf_con_diagrama_y_texto_conserva_ambos(tmp_path):
+    from reportlab.pdfgen import canvas
+
+    ruta = tmp_path / "mixto.pdf"
+    dibujo = canvas.Canvas(str(ruta))
+    dibujo.drawString(40, 700, "Texto seleccionable junto al diagrama que debe conservarse.")
+    for i in range(3):
+        dibujo.rect(40 + i * 100, 400, 80, 60)
+    dibujo.save()
+    resultado = parsear_archivo(ruta.read_bytes(), "mixto.pdf")
+    assert resultado.paginas_visuales == [1]
+    assert "Texto seleccionable" in resultado.paginas[0].texto
+    assert resultado.estado_documento.value == "processing"
+
+
+def test_timeout_pdf_termina_el_proceso(pdf_valido):
+    import multiprocessing
+
+    anteriores = {p.pid for p in multiprocessing.active_children()}
+    with pytest.raises(ParserError) as error:
+        parsear_archivo(pdf_valido.read_bytes(), "lento.pdf", LimitesIngesta(presupuesto_extraccion_segundos=0.001))
+    assert error.value.codigo.value == "TIMEOUT_EXTRACCION"
+    assert {p.pid for p in multiprocessing.active_children()} == anteriores
+
+
 # ---------------------------------------------------------------------------
 # Criterio 1: los documentos demo de #05 parsean con metadatos
 # ---------------------------------------------------------------------------
@@ -37,14 +76,16 @@ pytestmark = pytest.mark.unit
 def test_pdf_demo_vcn_parsea_con_paginas_y_deriva_el_diagrama(documento_demo_vcn):
     """El PDF VCN (fuente común de la demo) parsea página a página.
 
-    Su página 4 es el diagrama vectorial: PyPDF no extrae texto de ella,
+    Su página 3 combina texto y un diagrama vectorial,
     así que el parser la reporta como página VISUAL pendiente de #30 y NO
     declara el documento ready (§4.2: no declarar ready lo incompleto).
     """
     resultado = parsear_archivo(documento_demo_vcn.read_bytes(), documento_demo_vcn.name)
 
     assert resultado.extension == "pdf"
-    assert 8 <= len(resultado.paginas) + len(resultado.paginas_visuales) <= 15
+    assert 8 <= len({p.numero for p in resultado.paginas} | set(resultado.paginas_visuales)) <= 15
+    assert 3 in resultado.paginas_visuales
+    assert resultado.estado_documento.value == "processing"
     assert resultado.paginas, "el PDF VCN tiene páginas con texto"
     assert all(pagina.numero >= 1 for pagina in resultado.paginas)
     assert resultado.cantidad_tokens > 0
@@ -208,18 +249,16 @@ def test_pdf_escaneado_puro_no_se_rechaza_queda_pendiente_de_vision(crear_pdf, m
     """Criterio del issue: un PDF legible pero sin texto (escaneo) NO se
     rechaza por texto vacío: se deriva al contrato visual de #30 y queda
     processing, sin declararse ready."""
-    from types import SimpleNamespace
-    from unittest.mock import patch
+    import io
 
-    pdf = crear_pdf("escaneado.pdf", paginas=2)
-    # Simular el escaneo: extract_text devuelve cadena vacía en todo el PDF.
-    # (SimpleNamespace en vez de object(): object() no acepta atributos.)
-    paginas_falsas = [SimpleNamespace(extract_text=lambda: "") for _ in range(2)]
-    with patch("app.core.rag.parser.PdfReader") as lector_falso:
-        instancia = lector_falso.return_value
-        instancia.is_encrypted = False
-        instancia.pages = paginas_falsas
-        resultado = parsear_archivo(pdf.read_bytes(), "escaneado.pdf")
+    from pypdf import PdfWriter
+
+    salida = io.BytesIO()
+    escritor = PdfWriter()
+    for _ in range(2):
+        escritor.add_blank_page(width=595, height=842)
+    escritor.write(salida)
+    resultado = parsear_archivo(salida.getvalue(), "escaneado.pdf")
 
     assert resultado.requiere_vision is True
     assert resultado.paginas == []

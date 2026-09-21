@@ -49,6 +49,7 @@ from __future__ import annotations
 import hashlib
 import io
 import math
+import multiprocessing
 import re
 import time
 from dataclasses import dataclass, field
@@ -81,6 +82,7 @@ class LimitesIngesta:
     max_paginas_visuales: int = 20
     # Presupuesto de reloj para la extracción completa (§11.3: "timeout").
     presupuesto_extraccion_segundos: float = 30.0
+    max_memoria_pdf_bytes: int = 512 * 1024 * 1024
     # Umbral heurístico: página con menos caracteres que esto cuenta como
     # página VISUAL (diagrama/escaneo), no como texto extraído.
     minimo_caracteres_por_pagina: int = 20
@@ -218,13 +220,27 @@ def _secciones_markdown(texto: str) -> list[SeccionTexto]:
     """
     lineas = texto.splitlines()
     limites: list[tuple[int, str]] = []  # (numero_de_linea_base_1, titulo)
+    bloque = ""
     for indice, linea in enumerate(lineas, start=1):
+        cerca = re.match(r"^ {0,3}(`{3,}|~{3,})", linea)
+        if cerca:
+            marcador = cerca.group(1)
+            if not bloque:
+                bloque = marcador
+            elif marcador[0] == bloque[0] and len(marcador) >= len(bloque):
+                bloque = ""
+            continue
+        if bloque:
+            continue
         # Encabezado ATX: 1..6 "#" al inicio. El título es el resto sin #.
         coincidencia = re.match(r"^(#{1,6})\s+(.*)$", linea)
         if coincidencia:
             limites.append((indice, coincidencia.group(2).strip()))
 
     secciones: list[SeccionTexto] = []
+    if limites and limites[0][0] > 1:
+        fin = limites[0][0] - 1
+        secciones.append(SeccionTexto("(introducción)", 1, fin, "\n".join(lineas[:fin])))
     for posicion, (linea_inicio, titulo) in enumerate(limites):
         linea_fin = limites[posicion + 1][0] - 1 if posicion + 1 < len(limites) else len(lineas)
         # El texto de la sección EXCLUYE la línea del propio encabezado
@@ -259,7 +275,7 @@ def _validar_texto_plano(contenido: bytes, extension: str, limites: LimitesInges
             f"El archivo .{extension} no es texto UTF-8 valido.",
             detalles={"detalle_tecnico": str(error), "sugerencia": "Guardar el archivo como UTF-8 y volver a subirlo."},
         ) from error
-    if b"\x00" in contenido:
+    if any(ord(c) < 32 and c not in "\t\n\r" for c in texto) or "\x7f" in texto:
         raise ParserError(
             ParserErrorCode.BINARIO,
             f"El archivo .{extension} contiene bytes binarios (byte nulo); no es un documento de texto.",
@@ -281,6 +297,52 @@ def _rechazo_limite(codigo: ParserErrorCode, limite: int, recibido, unidad: str)
 # --------------------------------------------------------------------------
 # Parseo PDF
 # --------------------------------------------------------------------------
+
+
+def _worker_pdf(canal, contenido: bytes, titulo: str, limites: LimitesIngesta) -> None:
+    """Proceso descartable: memoria acotada en Linux (OCI)."""
+    try:
+        import sys
+
+        if sys.platform == "linux":
+            import resource
+
+            resource.setrlimit(resource.RLIMIT_AS, (limites.max_memoria_pdf_bytes, limites.max_memoria_pdf_bytes))
+        canal.send((True, _parsear_pdf(contenido, titulo, limites)))
+    except ParserError as error:
+        canal.send((False, (error.codigo, error.mensaje, error.detalles)))
+    except Exception:
+        canal.send((False, (ParserErrorCode.CORRUPTO, "PDF ilegible o excede la memoria de extracción.", {})))
+    finally:
+        canal.close()
+
+
+def _pdf_aislado(contenido: bytes, titulo: str, limites: LimitesIngesta) -> ResultadoParseo:
+    contexto = multiprocessing.get_context("spawn")
+    receptor, emisor = contexto.Pipe(duplex=False)
+    proceso = contexto.Process(target=_worker_pdf, args=(emisor, contenido, titulo, limites), daemon=True)
+    try:
+        proceso.start()
+        emisor.close()
+        if not receptor.poll(limites.presupuesto_extraccion_segundos):
+            raise ParserError(ParserErrorCode.TIMEOUT_EXTRACCION, "La extracción PDF excedió el tiempo permitido.")
+        try:
+            correcto, resultado = receptor.recv()
+        except EOFError as error:
+            raise ParserError(
+                ParserErrorCode.CORRUPTO, "El proceso de extracción PDF terminó sin resultado."
+            ) from error
+        if not correcto:
+            raise ParserError(*resultado)
+        return resultado
+    finally:
+        if proceso.pid is not None:
+            if proceso.is_alive():
+                proceso.terminate()
+            proceso.join()
+            proceso.close()
+        receptor.close()
+        emisor.close()
 
 
 def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta) -> ResultadoParseo:
@@ -338,11 +400,19 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
             # registrada como página visual/omitida en la cobertura.
             texto = ""
         texto = texto.strip()
-        if len(texto) < limites.minimo_caracteres_por_pagina:
+        contenido_pagina = pagina.get_contents()
+        operadores = [op for _, op in contenido_pagina.operations] if contenido_pagina is not None else []
+        visual = b"Do" in operadores or sum(op in (b"S", b"s", b"f", b"f*", b"B", b"B*") for op in operadores) >= 3
+        if len(texto) < limites.minimo_caracteres_por_pagina or visual:
             # Sin texto extraíble => diagrama o escaneo => contrato visual #30.
             paginas_visuales.append(numero)
-        else:
+        if texto:
             paginas.append(PaginaTexto(numero=numero, texto=texto))
+        tokens_acumulados = estimar_tokens("\n".join(p.texto for p in paginas))
+        if tokens_acumulados > limites.max_tokens_extraidos:
+            raise _rechazo_limite(
+                ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens_acumulados, "tokens estimados"
+            )
 
     if len(paginas_visuales) > limites.max_paginas_visuales:
         raise _rechazo_limite(
@@ -414,6 +484,9 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
 def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limites: LimitesIngesta) -> ResultadoParseo:
     """MD/TXT: validar UTF-8/binario, secciones y límites de tokens."""
     texto = _validar_texto_plano(contenido, extension, limites)
+    if not texto.strip("\ufeff \t\n\r"):
+        raise ParserError(ParserErrorCode.EXTRACCION_INSUFICIENTE, "El archivo no contiene texto para procesar.")
+    texto = texto.lstrip("\ufeff")
     tokens = estimar_tokens(texto)
     if tokens > limites.max_tokens_extraidos:
         raise _rechazo_limite(ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens, "tokens estimados")
@@ -481,7 +554,7 @@ def parsear_archivo(contenido: bytes, nombre_etiqueta: str, limites: LimitesInge
                 f"El archivo '{nombre_limpio}' no tiene la firma de un PDF real (se esperaba '%PDF-').",
                 detalles={"sugerencia": "Subir el archivo original sin renombrar su extension."},
             )
-        return _parsear_pdf(contenido, nombre_limpio, limites)
+        return _pdf_aislado(contenido, nombre_limpio, limites)
 
     if extension in ("md", "markdown", "txt"):
         if len(contenido) > limites.max_bytes_texto:
