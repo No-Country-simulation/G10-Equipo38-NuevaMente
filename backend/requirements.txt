@@ -21,3 +21,5 @@ pydantic-settings==2.15.0
 # el parser (app/core/rag/parser.py). Misma version que usa la suite en
 # requirements-dev (verificacion y fixture de PDF cifrado).
 pypdf==6.19.0
+# BPE local de referencia para chunking; vocabulario versionado con el código.
+tiktoken==0.12.0
