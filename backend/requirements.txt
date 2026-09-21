@@ -17,3 +17,7 @@ uvicorn==0.53.0
 # pydantic-settings (issue #07): lee la configuración desde variables de
 # entorno/.env con los tipos y validaciones de app/config.py (Apéndice A).
 pydantic-settings==2.15.0
+# pypdf (issue #11): extraccion de texto y metadatos de pagina de los PDF en
+# el parser (app/core/rag/parser.py). Misma version que usa la suite en
+# requirements-dev (verificacion y fixture de PDF cifrado).
+pypdf==6.19.0

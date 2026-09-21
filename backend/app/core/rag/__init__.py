@@ -3,9 +3,11 @@
 Contrato compartido del carril: documento, chunk, evidencia y filtros de
 acceso (docs/guia-trabajo-equipo.md §2).
 
-Módulos previstos (§15):
-- parser.py: extracción de texto de PDF/MD/TXT con validación de firma real,
-  límites y timeout (issue #11; seguridad de §11.3).
+Módulos:
+- parser.py (issue #11, implementado): ingesta de PDF/MD/TXT y texto pegado
+  con validación de firma real, límites de §4.1 configurables, cobertura
+  informe, páginas visuales derivadas al contrato de #30 y códigos de
+  rechazo estables. Consumido por los endpoints de documentos (#19).
 - chunker.py: segmentación estructural medida en tokens con chunk_id
   estable (issue #12).
 - embeddings.py: cliente de embeddings de Gemini (issue #13).
