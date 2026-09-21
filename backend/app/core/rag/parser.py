@@ -32,10 +32,10 @@ Reglas del plan que este módulo hace cumplir:
 
 Sobre la estimación de TOKENS: el límite de §4.1 es "100.000 tokens
 extraídos", pero el tokenizador real vive con el chunker (#12). Acá usamos
-una estimación conservadora (máximo entre caracteres/4 y palabras×1.3,
-redondeado hacia arriba): si la estimación conservadora ya excede el
-límite, el documento seguro lo excede. #12 podrá reemplazar el estimador
-sin cambiar el contrato de `ResultadoParseo`.
+una aproximación (máximo entre caracteres/4 y palabras×1.3, redondeado
+hacia arriba). No garantiza un límite de tokens real para todos los idiomas.
+El chunker aplica su límite por fragmento con un tokenizador BPE explícito;
+el adaptador del proveedor debe comprobar sus propios límites antes de enviar.
 
 Códigos de error: `ParserErrorCode` son códigos DE MÁQUINA estables de este
 módulo. La capa de API (#19) los mapea a los HTTP del contrato (413 para
@@ -48,11 +48,12 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import math
 import multiprocessing
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -153,6 +154,9 @@ class SeccionTexto:
     linea_inicio: int
     linea_fin: int
     texto: str
+    cuerpo_linea_inicio: int | None = None
+    start_index: int = 0  # Caracteres en el texto normalizado a LF, sin BOM.
+    encabezado: str | None = None
 
 
 @dataclass
@@ -181,6 +185,7 @@ class ResultadoParseo:
     estado_documento: DocumentStatus = DocumentStatus.READY
     detalle_estado: str | None = None
     cobertura: str = ""
+    huella_config_parser: str = ""
 
 
 # --------------------------------------------------------------------------
@@ -189,11 +194,11 @@ class ResultadoParseo:
 
 
 def estimar_tokens(texto: str) -> int:
-    """Estimación conservadora de tokens (ver docstring del módulo).
+    """Aproximación de tokens (ver docstring del módulo).
 
     Dos heurísticas y nos quedamos con la MÁXIMA: caracteres/4 (regla usual
     para español/inglés) y palabras×1.3 (textos con muchas palabras cortas).
-    Conservadora = si esta cifra entra en el límite, el conteo real también.
+    No constituye una cota superior garantizada del tokenizador del proveedor.
     """
     if not texto:
         return 0
@@ -219,6 +224,9 @@ def _secciones_markdown(texto: str) -> list[SeccionTexto]:
     apuntar al documento original (§4.3: metadatos de trazabilidad).
     """
     lineas = texto.splitlines()
+    offsets = [0]
+    for linea in lineas:
+        offsets.append(offsets[-1] + len(linea) + 1)
     limites: list[tuple[int, str]] = []  # (numero_de_linea_base_1, titulo)
     bloque = ""
     for indice, linea in enumerate(lineas, start=1):
@@ -227,33 +235,43 @@ def _secciones_markdown(texto: str) -> list[SeccionTexto]:
             marcador = cerca.group(1)
             if not bloque:
                 bloque = marcador
-            elif marcador[0] == bloque[0] and len(marcador) >= len(bloque):
+            elif re.fullmatch(r" {0,3}" + re.escape(bloque[0]) + "{" + str(len(bloque)) + r",}\s*", linea):
                 bloque = ""
             continue
         if bloque:
             continue
         # Encabezado ATX: 1..6 "#" al inicio. El título es el resto sin #.
-        coincidencia = re.match(r"^(#{1,6})\s+(.*)$", linea)
+        coincidencia = re.match(r"^ {0,3}(#{1,6})\s+(.*)$", linea)
         if coincidencia:
             limites.append((indice, coincidencia.group(2).strip()))
 
     secciones: list[SeccionTexto] = []
     if limites and limites[0][0] > 1:
         fin = limites[0][0] - 1
-        secciones.append(SeccionTexto("(introducción)", 1, fin, "\n".join(lineas[:fin])))
+        secciones.append(SeccionTexto("(introducción)", 1, fin, "\n".join(lineas[:fin]), 1, 0))
     for posicion, (linea_inicio, titulo) in enumerate(limites):
         linea_fin = limites[posicion + 1][0] - 1 if posicion + 1 < len(limites) else len(lineas)
         # El texto de la sección EXCLUYE la línea del propio encabezado
         # siguiente (que abre la sección siguiente).
         cuerpo = "\n".join(lineas[linea_inicio:linea_fin])
         secciones.append(
-            SeccionTexto(titulo=titulo, linea_inicio=linea_inicio, linea_fin=linea_fin, texto=cuerpo.strip())
+            SeccionTexto(
+                titulo=titulo,
+                linea_inicio=linea_inicio,
+                linea_fin=linea_fin,
+                texto=cuerpo,
+                cuerpo_linea_inicio=linea_inicio + 1,
+                start_index=offsets[linea_inicio],
+                encabezado=lineas[linea_inicio - 1],
+            )
         )
 
     if not secciones:
         # Markdown sin encabezados: una única sección con todo el contenido.
         secciones.append(
-            SeccionTexto(titulo="(sin encabezados)", linea_inicio=1, linea_fin=len(lineas), texto=texto.strip())
+            SeccionTexto(
+                titulo="(sin encabezados)", linea_inicio=1, linea_fin=len(lineas), texto=texto, cuerpo_linea_inicio=1
+            )
         )
     return secciones
 
@@ -473,6 +491,9 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
         estado_documento=estado,
         detalle_estado=detalle,
         cobertura=cobertura,
+        huella_config_parser=hashlib.sha256(
+            json.dumps({"version": "2", **asdict(limites)}, sort_keys=True).encode()
+        ).hexdigest(),
     )
 
 
@@ -486,7 +507,7 @@ def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limit
     texto = _validar_texto_plano(contenido, extension, limites)
     if not texto.strip("\ufeff \t\n\r"):
         raise ParserError(ParserErrorCode.EXTRACCION_INSUFICIENTE, "El archivo no contiene texto para procesar.")
-    texto = texto.lstrip("\ufeff")
+    texto = texto.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     tokens = estimar_tokens(texto)
     if tokens > limites.max_tokens_extraidos:
         raise _rechazo_limite(ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens, "tokens estimados")
@@ -499,7 +520,8 @@ def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limit
                 titulo=titulo_etiqueta or "contenido",
                 linea_inicio=1,
                 linea_fin=len(texto.splitlines()),
-                texto=texto.strip(),
+                texto=texto,
+                cuerpo_linea_inicio=1,
             )
         ]
     )
@@ -516,6 +538,9 @@ def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limit
         cantidad_tokens=tokens,
         estado_documento=DocumentStatus.READY,
         cobertura=cobertura,
+        huella_config_parser=hashlib.sha256(
+            json.dumps({"version": "2", **asdict(limites)}, sort_keys=True).encode()
+        ).hexdigest(),
     )
 
 

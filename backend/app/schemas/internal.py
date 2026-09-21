@@ -54,6 +54,15 @@ class Chunk(BaseModel):
     pagina: int | None = Field(default=None, ge=1)
     seccion: str | None = None
     cantidad_tokens: int = Field(gt=0)
+    workspace_id: str | None = None
+    document_hash: str | None = None
+    source_name: str | None = None
+    source_type: str | None = None
+    start_index: int | None = Field(default=None, ge=0)
+    linea_inicio: int | None = Field(default=None, ge=1)
+    linea_fin: int | None = Field(default=None, ge=1)
+    language: str | None = None
+    tokenizer: str | None = None
     es_diagrama: bool = Field(
         default=False, description="True si representa una página/imagen visual (ingesta multimodal #30)."
     )

@@ -182,6 +182,26 @@ docker compose build
 
 ---
 
+## Segmentación de documentos (issue #12)
+
+`app.core.rag.chunker.trocear(resultado_parseo, workspace_id, document_id)`
+produce fragmentos con IDs deterministas y metadatos listos para Chroma mediante
+`metadatos_chroma()`. El objetivo es 750 tokens, con hasta 120 de solapamiento
+y techo de 825 incluyendo encabezados, cercas y contexto repetido.
+Se respetan secciones y páginas; las tablas partidas repiten sus cabeceras.
+Una fila que no cabe se rechaza con `ChunkingError`, sin truncarla.
+
+El tokenizador BPE `cl100k_base` y su vocabulario se incluyen localmente para
+funcionar sin red. Es una medida de segmentación: el cliente Gemini debe validar
+sus propios límites antes de enviar contenido. `ConfigChunker` permite ajustar
+los límites; un tokenizador alternativo debe declarar su identidad versionada.
+
+Las citas MD/TXT conservan líneas del cuerpo original (base 1). `start_index`
+es un desplazamiento en caracteres, normalizando BOM y saltos CRLF/CR a LF;
+en PDF es relativo a la página. El contexto repetido no altera estas posiciones.
+Los IDs incluyen espacio, documento, hash, configuración del parser/chunker y
+tokenizador. Pruebas: `pytest backend/tests/test_chunker.py`.
+
 ## 🤖 Catálogo de Skills para Agentes de IA
 
 El repositorio cuenta con 13 skills especializadas y armonizadas en `.agents/skills/`, gobernadas por el orquestador maestro [`AGENTS.md`](./AGENTS.md) y registradas en [`.agents/skills.json`](./.agents/skills.json):
