@@ -62,7 +62,7 @@ from app.schemas.enums import DocumentStatus, JobStatus
 # Versión actual del esquema. Cada cambio de esquema agrega una entrada a
 # MIGRACIONES y sube este número; NUNCA se edita una migración ya aplicada
 # (las bases reales de los usuarios quedaron con la vieja).
-VERSION_ESQUEMA = 2
+VERSION_ESQUEMA = 3
 
 # Cada migración: (versión, SQL). Se aplican en orden ascendente dentro de
 # una transacción cada una. La v1 crea todas las tablas del issue #08.
@@ -150,7 +150,7 @@ MIGRACIONES: list[tuple[int, str]] = [
         );
 
         -- Tombstones de borrado (§8.5): "este recurso fue retirado por el
-        -- usuario". Viven hasta purga_despues_en (plazo de retención) para
+        -- usuario". purga_despues_en habilita limpieza, nunca acceso; existen para
         -- que una reconstrucción desde OCI no lo resucite (§11.5).
         CREATE TABLE pending_deletes (
             recurso_tipo    TEXT NOT NULL CHECK (recurso_tipo IN ('workspace', 'document', 'generation')),
@@ -190,6 +190,14 @@ MIGRACIONES: list[tuple[int, str]] = [
         CREATE INDEX idx_jobs_workspace ON jobs(workspace_id);
         CREATE INDEX idx_jobs_cola ON jobs(status, creado_en);
         """,
+    ),
+    (
+        3,
+        """
+        ALTER TABLE jobs ADD COLUMN generation_id TEXT REFERENCES generations(generation_id);
+        CREATE UNIQUE INDEX idx_jobs_generation ON jobs(generation_id);
+        CREATE INDEX idx_events_job ON events(job_id, id);
+    """,
     ),
 ]
 
@@ -506,9 +514,9 @@ class RegistroOperativo:
             """
             SELECT d.* FROM documents d
             JOIN workspaces w ON w.workspace_id = d.workspace_id
-            WHERE d.document_id = ? AND w.borrado_en IS NULL
+            WHERE d.document_id = ? AND w.borrado_en IS NULL AND w.expira_en > ?
             """,
-            (document_id,),
+            (document_id, _iso(_ahora())),
         ).fetchone()
         return dict(fila) if fila else None
 
@@ -555,9 +563,9 @@ class RegistroOperativo:
             """
             SELECT g.* FROM generations g
             JOIN workspaces w ON w.workspace_id = g.workspace_id
-            WHERE g.generation_id = ? AND w.borrado_en IS NULL
+            WHERE g.generation_id = ? AND w.borrado_en IS NULL AND w.expira_en > ?
             """,
-            (generation_id,),
+            (generation_id, _iso(_ahora())),
         ).fetchone()
         if fila and self.esta_borrado("document", fila["document_id"]):
             return None
@@ -579,20 +587,18 @@ class RegistroOperativo:
             SELECT g.* FROM generations g
             JOIN workspaces w ON w.workspace_id = g.workspace_id
             WHERE g.workspace_id = ?
-              AND w.borrado_en IS NULL
+              AND w.borrado_en IS NULL AND w.expira_en > ?
               AND NOT EXISTS (
                   SELECT 1 FROM pending_deletes pd
                    WHERE pd.recurso_tipo = 'generation' AND pd.recurso_id = g.generation_id
-                     AND pd.purga_despues_en > ?
               )
               AND NOT EXISTS (
                   SELECT 1 FROM pending_deletes pd2
                    WHERE pd2.recurso_tipo = 'document' AND pd2.recurso_id = g.document_id
-                     AND pd2.purga_despues_en > ?
               )
             ORDER BY g.creado_en DESC
             """,
-            (workspace_id, ahora, ahora),
+            (workspace_id, ahora),
         ).fetchall()
         return [dict(fila) for fila in filas]
 
@@ -611,6 +617,49 @@ class RegistroOperativo:
                 """,
                 (job_id, workspace_id, tipo, status.value, ahora, ahora),
             )
+
+    @_sincronizado
+    def encolar_job(self, job_id: str, workspace_id: str, tipo: str, generation_id: str | None = None) -> None:
+        """Acepta trabajo y evento juntos; la generación vinculada comparte su ciclo de vida."""
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            if self.obtener_workspace(workspace_id) is None:
+                raise ValueError("El espacio no está disponible")
+            if generation_id:
+                generacion = self.obtener_generacion(generation_id)
+                if not generacion or generacion["workspace_id"] != workspace_id or generacion["status"] != "queued":
+                    raise ValueError("La generación no está disponible para encolar")
+            self.registrar_job(job_id, workspace_id, tipo)
+            self._conn.execute("UPDATE jobs SET generation_id=? WHERE job_id=?", (generation_id, job_id))
+            self.registrar_evento(
+                workspace_id, "encolado", JobStatus.QUEUED, job_id=job_id, generation_id=generation_id
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+
+    @_sincronizado
+    def iniciar_job(self, job_id: str) -> None:
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            fila = self.obtener_job(job_id)
+            if not fila or fila["status"] != "queued":
+                raise ValueError("El trabajo no está disponible")
+            self.actualizar_job(job_id, JobStatus.RUNNING)
+            if fila["generation_id"]:
+                self.actualizar_generacion(fila["generation_id"], JobStatus.RUNNING)
+            self.registrar_evento(
+                fila["workspace_id"],
+                fila["tipo"],
+                JobStatus.RUNNING,
+                job_id=job_id,
+                generation_id=fila["generation_id"],
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def actualizar_job(
         self,
@@ -706,10 +755,19 @@ class RegistroOperativo:
         try:
             fila = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
             if fila and fila["status"] in (JobStatus.QUEUED.value, JobStatus.RUNNING.value):
-                if status == JobStatus.COMPLETED and self.obtener_workspace(fila["workspace_id"]) is None:
+                if status == JobStatus.COMPLETED and (
+                    self.obtener_workspace(fila["workspace_id"]) is None
+                    or (fila["generation_id"] and self.obtener_generacion(fila["generation_id"]) is None)
+                ):
                     status, datos = JobStatus.CANCELLED, {"error_message": "El espacio fue retirado."}
                 self.actualizar_job(job_id, status, **datos)
-                self.registrar_evento(fila["workspace_id"], fila["tipo"], status, job_id=job_id)
+                if fila["generation_id"]:
+                    self.actualizar_generacion(
+                        fila["generation_id"], status, datos.get("error_code"), datos.get("error_message")
+                    )
+                self.registrar_evento(
+                    fila["workspace_id"], fila["tipo"], status, job_id=job_id, generation_id=fila["generation_id"]
+                )
             self._conn.execute("COMMIT")
         except Exception:
             self._conn.execute("ROLLBACK")
@@ -725,17 +783,15 @@ class RegistroOperativo:
         Idempotency-Key (§7.3) evita duplicar el efecto.
         """
         with self._lock:
-            cursor = self._conn.execute(
-                """
-                UPDATE jobs
-                   SET status = ?, error_code = 'INTERRUPTED',
-                       error_message = 'El proceso que acepto el trabajo se reinicio.',
-                       actualizado_en = ?
-                 WHERE status IN (?, ?)
-                """,
-                (JobStatus.FAILED.value, _iso(_ahora()), JobStatus.QUEUED.value, JobStatus.RUNNING.value),
-            )
-            return cursor.rowcount
+            pendientes = self._conn.execute("SELECT job_id FROM jobs WHERE status IN ('queued', 'running')").fetchall()
+            for fila in pendientes:
+                self.finalizar_job(
+                    fila["job_id"],
+                    JobStatus.FAILED,
+                    error_code="INTERRUPTED",
+                    error_message="El proceso que aceptó el trabajo se reinició.",
+                )
+            return len(pendientes)
 
     # ------------------------------------------------------------------
     # Idempotencia (§7.3): el corazón atómico del issue
@@ -866,12 +922,20 @@ class RegistroOperativo:
         ).fetchall()
         return [dict(fila) for fila in filas]
 
+    @_sincronizado
+    def eventos_desde_job(self, job_id: str, ultimo_id: int = 0) -> list[dict]:
+        """Cursor SSE para trabajos comunes; la API valida ownership antes de consultar."""
+        filas = self._conn.execute(
+            "SELECT * FROM events WHERE job_id = ? AND id > ? ORDER BY id ASC", (job_id, ultimo_id)
+        ).fetchall()
+        return [dict(fila) for fila in filas]
+
     # ------------------------------------------------------------------
     # Tombstones de borrado (§8.5, §11.5)
     # ------------------------------------------------------------------
 
     def agendar_borrado(self, recurso_tipo: str, recurso_id: str, workspace_id: str) -> None:
-        """Deja lápida del recurso por el plazo de retención.
+        """Deja una lápida persistente; purga_despues_en indica elegibilidad para limpieza.
 
         Las lápidas viven EN ESTA BASE (y en los manifiestos OCI cuando #14
         llegue): su trabajo es evitar que un borrado se "deshaga" por
@@ -897,10 +961,10 @@ class RegistroOperativo:
 
     @_sincronizado
     def esta_borrado(self, recurso_tipo: str, recurso_id: str) -> bool:
-        """True si hay lápida vigente del recurso (aún no purgada)."""
+        """True mientras exista la lápida; el plazo nunca restaura acceso."""
         fila = self._conn.execute(
-            "SELECT 1 FROM pending_deletes WHERE recurso_tipo = ? AND recurso_id = ? AND purga_despues_en > ?",
-            (recurso_tipo, recurso_id, _iso(_ahora())),
+            "SELECT 1 FROM pending_deletes WHERE recurso_tipo = ? AND recurso_id = ?",
+            (recurso_tipo, recurso_id),
         ).fetchone()
         return fila is not None
 

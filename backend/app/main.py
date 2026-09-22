@@ -45,7 +45,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import Configuracion, config
-from app.schemas.errors import ErrorBody, ErrorCode, ErrorResponse
+from app.schemas.errors import ErrorAplicacion, ErrorBody, ErrorCode, ErrorResponse
 
 # ContextVar: una variable que vale "para la petición actual". Los módulos
 # de negocio podrán leer el request_id para logging sin pasarlo a mano por
@@ -169,6 +169,15 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         )
 
     # ------------------------- Handlers de excepción -------------------------
+
+    @app.exception_handler(ErrorAplicacion)
+    async def manejar_dominio(request: Request, exc: ErrorAplicacion):
+        request_id = _request_id_de(request)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_envoltorio(exc.error.code, exc.error.message, request_id, exc.error.details),
+            headers={CABECERA_REQUEST_ID: request_id},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def manejar_validacion(request: Request, exc: RequestValidationError):

@@ -100,3 +100,30 @@ class ErrorResponse(BaseModel):
 
     error: ErrorBody
     request_id: str = Field(description="Correlaciona la respuesta con los logs (§11.5).")
+
+
+HTTP_POR_CODIGO = {
+    ErrorCode.INVALID_REQUEST: 400,
+    ErrorCode.SESSION_INVALID: 401,
+    ErrorCode.NOT_FOUND: 404,
+    ErrorCode.IDEMPOTENCY_CONFLICT: 409,
+    ErrorCode.INVALID_STATE: 409,
+    ErrorCode.DOCUMENT_TOO_LARGE: 413,
+    ErrorCode.EXPORT_INCOMPATIBLE: 422,
+    ErrorCode.VALIDATION_ERROR: 422,
+    ErrorCode.QUEUE_FULL: 429,
+    ErrorCode.RATE_LIMITED: 429,
+    ErrorCode.RECOVERY_LOCKED: 429,
+    ErrorCode.INTERNAL: 500,
+    ErrorCode.STORAGE_UNAVAILABLE: 503,
+    ErrorCode.PROVIDER_UNAVAILABLE: 503,
+}
+
+
+class ErrorAplicacion(Exception):
+    """Error público de dominio; mensaje/detalles seguros, sin texto crudo del proveedor."""
+
+    def __init__(self, code: ErrorCode, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.error = ErrorBody(code=code, message=message, details=details)
+        self.status_code = HTTP_POR_CODIGO[self.error.code]

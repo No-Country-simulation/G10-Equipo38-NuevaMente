@@ -270,12 +270,11 @@ class LocalMockStorageProvider(StorageProvider):
         self._escribir_meta(meta)
 
 
-def get_storage_provider(base_dir: Path | str | None = None) -> StorageProvider:
+def get_storage_provider(base_dir: Path | str | None = None, *, configuracion=None) -> StorageProvider:
     """Fábrica del proveedor de almacenamiento según MOCK_OCI (§8.2).
 
-    Lee la variable de entorno EN EL MOMENTO de la llamada (no al importar
-    el módulo): así los tests pueden simular distintas configuraciones y el
-    arranque del backend decide con la configuración final del proceso.
+    Recibe Configuracion validada; sin inyección la construye al llamar,
+    leyendo entorno y .env con las mismas reglas que el backend.
 
     - MOCK_OCI=1 -> LocalMockStorageProvider. Sin red, sin credenciales.
     - MOCK_OCI=0 (o sin definir) -> proveedor real. HOY ese proveedor llega
@@ -284,19 +283,21 @@ def get_storage_provider(base_dir: Path | str | None = None) -> StorageProvider:
       sea obvio — y nunca, en ninguna rama, se devuelve el mock en su
       lugar (criterio de aceptación 3 del issue #04).
     """
-    mock_activado = os.getenv("MOCK_OCI", "0").strip() == "1"
-    if mock_activado:
-        if os.getenv("APP_ENV", "development").strip().lower() == "production":
-            raise StorageConfigError("APP_ENV=production no admite MOCK_OCI=1")
-        return LocalMockStorageProvider(base_dir=base_dir)
+    try:
+        from app.config import Configuracion
 
-    faltantes = [variable for variable in VARIABLES_REQUERIDAS_REAL if not os.getenv(variable)]
-    detalle = (
-        "faltan variables de entorno: " + ", ".join(faltantes)
-        if faltantes
-        else "el proveedor OCI real se implementa en el issue #14"
-    )
+        ajustes = configuracion or Configuracion()
+        ajustes.validar_critico()
+    except (ValueError, RuntimeError) as error:
+        raise StorageConfigError(
+            "Configuración inválida: production no admite mocks; revisar APP_ENV y credenciales OCI"
+        ) from error
+    if ajustes.mock_oci:
+        return LocalMockStorageProvider(
+            base_dir=base_dir if base_dir is not None else Path(ajustes.data_dir) / "oci_mock_storage"
+        )
     raise StorageConfigError(
-        "MOCK_OCI=0 exige almacenamiento OCI real y no se puede construir el proveedor: "
-        f"{detalle}. Para desarrollo/CI usá MOCK_OCI=1 (nunca habrá fallback automático, §8.2)."
+        "MOCK_OCI=0 exige almacenamiento OCI real: el proveedor real se implementa en el issue #14. "
+        "Configurar OCI_BUCKET_NAME, OCI_COMPARTMENT_ID, OCI_REGION, OCI_CONFIG_FILE y ese proveedor; "
+        "para desarrollo/CI usar MOCK_OCI=1."
     )

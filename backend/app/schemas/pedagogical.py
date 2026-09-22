@@ -37,14 +37,26 @@ segundo contrato de salida.
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # -----------------------------------------------------------------------------
 # Piezas compartidas por varios formatos
 # -----------------------------------------------------------------------------
 
 
-class Referencia(BaseModel):
+class ModeloContenido(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def textos_no_vacios(cls, valor):
+        elementos = valor if isinstance(valor, list) else [valor]
+        if any(isinstance(item, str) and not item.strip() for item in elementos):
+            raise ValueError("El texto no puede estar vacío ni contener solo espacios")
+        return valor
+
+
+class Referencia(ModeloContenido):
     """Dónde verificar una afirmación dentro del documento original.
 
     Toda tarjeta, pregunta, paso o escena cita su evidencia: un ``chunk_id``
@@ -60,7 +72,7 @@ class Referencia(BaseModel):
     seccion: str | None = Field(default=None, description="Sección/título del documento original.")
 
 
-class AlcanceSolicitud(BaseModel):
+class AlcanceSolicitud(ModeloContenido):
     """Qué parte del documento se adapta (§16.1).
 
     Se usa DOS veces con el mismo modelo: en la petición de generación
@@ -111,7 +123,7 @@ TEXTO_MAX = 5000
 # -----------------------------------------------------------------------------
 
 
-class FlashcardItem(BaseModel):
+class FlashcardItem(ModeloContenido):
     """Una tarjeta de memorización: frente (pregunta), dorso (respuesta)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -130,7 +142,7 @@ class FlashcardItem(BaseModel):
     )
 
 
-class FlashcardDeck(BaseModel):
+class FlashcardDeck(ModeloContenido):
     """Mazo de flashcards (formato_salida=flashcards).
 
     Es el formato que se exporta a Anki (.apkg/CSV/TSV) con el issue #45;
@@ -160,7 +172,7 @@ class FlashcardDeck(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class QuizOption(BaseModel):
+class QuizOption(ModeloContenido):
     """Una opción de respuesta multiple choice."""
 
     model_config = ConfigDict(extra="forbid")
@@ -169,7 +181,7 @@ class QuizOption(BaseModel):
     texto: str = Field(min_length=1, max_length=TEXTO_MAX)
 
 
-class QuizQuestion(BaseModel):
+class QuizQuestion(ModeloContenido):
     """Una pregunta del quiz, con su clave y justificación didáctica.
 
     OJO (§16.2 y contratos-api.md): la respuesta correcta y la justificación
@@ -220,7 +232,7 @@ class QuizQuestion(BaseModel):
         return self
 
 
-class InteractiveQuiz(BaseModel):
+class InteractiveQuiz(ModeloContenido):
     """Quiz interactivo con feedback inmediato (formato_salida=quiz)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -255,7 +267,7 @@ class InteractiveQuiz(BaseModel):
         )
 
 
-class PreguntaVistaEstudiante(BaseModel):
+class PreguntaVistaEstudiante(ModeloContenido):
     """Pregunta de quiz tal como la recibe el estudiante: SIN respuesta ni justificación."""
 
     model_config = ConfigDict(extra="forbid")
@@ -265,7 +277,8 @@ class PreguntaVistaEstudiante(BaseModel):
     opciones: list[QuizOption]
 
 
-class QuizVistaEstudiante(BaseModel):
+class QuizVistaEstudiante(ModeloContenido):
+    tipo: Literal["quiz"] = "quiz"
     """Quiz completo en su vista de estudiante (sin claves)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -280,7 +293,7 @@ class QuizVistaEstudiante(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class PasoTutorial(BaseModel):
+class PasoTutorial(ModeloContenido):
     """Un paso del tutorial: hacer, observar y verificar (pedagogía del check)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -299,7 +312,7 @@ class PasoTutorial(BaseModel):
     referencias: list[Referencia] = Field(min_length=1)
 
 
-class PracticalTutorial(BaseModel):
+class PracticalTutorial(ModeloContenido):
     """Guía práctica paso a paso (formato_salida=tutorial)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -327,7 +340,7 @@ class PracticalTutorial(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class ExecutiveSummary(BaseModel):
+class ExecutiveSummary(ModeloContenido):
     """Resumen ejecutivo TL;DR (formato_salida=resumen_ejecutivo).
 
     Pensado para Gestor/Ejecutivo: valor de negocio e implicaciones antes
@@ -352,7 +365,7 @@ class ExecutiveSummary(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class EscenaGuion(BaseModel):
+class EscenaGuion(ModeloContenido):
     """Una escena del guion: lo que se narra y lo que se muestra en pantalla."""
 
     model_config = ConfigDict(extra="forbid")
@@ -369,7 +382,7 @@ class EscenaGuion(BaseModel):
     referencias: list[Referencia] = Field(min_length=1)
 
 
-class VideoLessonScript(BaseModel):
+class VideoLessonScript(ModeloContenido):
     """Guion de clase/video (formato_salida=guion_clase).
 
     §16.2 aclara: es un DOCUMENTO de clase; no se promete generar un archivo
@@ -406,5 +419,11 @@ ContenidoAdaptado = Annotated[
         ExecutiveSummary,
         VideoLessonScript,
     ],
+    Field(discriminator="tipo"),
+]
+
+
+ContenidoEstudiante = Annotated[
+    Union[FlashcardDeck, QuizVistaEstudiante, PracticalTutorial, ExecutiveSummary, VideoLessonScript],
     Field(discriminator="tipo"),
 ]

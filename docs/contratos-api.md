@@ -361,3 +361,48 @@ La UI permite copiar/descargar el código una vez, rotarlo, cerrar sesión y bor
 - La reserva SQLite de idempotencia exige un `recurso_id` desde la primera llamada; los reintentos en curso reutilizan ese ID y completar la operación no puede cambiarlo. No se cachean credenciales.
 
 Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqueta `contract-change` al abrir el PR.
+
+
+### Precisiones de implementación tras la revisión de la base
+
+- `GenerationJobResponse.contenido` utiliza `PedagogicalStudentOutput`. Para quiz,
+  `contenido_adaptado` conserva `tipo: "quiz"`, título, introducción y preguntas
+  con ID/enunciado/opciones; no incluye la clave correcta ni justificaciones.
+  `PedagogicalStudentOutput.desde_canonico(paquete)` construye esa proyección.
+  El canónico `PedagogicalOutput` conserva todas las respuestas para almacenamiento
+  y exportación autorizada. Los otros cuatro formatos mantienen su estructura.
+- Los textos declarados y los elementos textuales de listas no admiten valores
+  vacíos ni compuestos solo por espacios. Las duraciones deben ser finitas y positivas.
+  `GenerateRequest.formato_salida` reutiliza `PedagogicalFormat` sin cambiar valores JSON.
+- Las rutas pueden lanzar `ErrorAplicacion(ErrorCode.QUEUE_FULL, mensaje, detalles)`
+  para conservar el código específico, su HTTP y `X-Request-ID`. `HTTPException`
+  conserva el mapeo genérico; no usar su `detail` para transportar códigos de dominio.
+- Esta precisión de esquemas públicos debe revisarse como `contract-change` en el PR.
+
+### Integración interna del registro y el ejecutor
+
+- SQLite migra automáticamente a v3: `jobs.generation_id` es opcional, único y
+  referencia una generación. `enqueue(..., generation_id=...)` vincula ambas
+  entidades; `running` y los estados terminales actualizan ambas en una transacción,
+  junto con el evento. El resultado canónico sigue perteneciendo a Object Storage.
+- `eventos_desde_job(job_id, ultimo_id)` recupera eventos comunes; `eventos_desde`
+  conserva el filtro por generación. La ruta debe comprobar ownership antes de leer.
+- Trabajo y evento inicial se aceptan atómicamente. Un fallo del ejecutor detiene
+  nuevas admisiones y marca los pendientes como interrumpidos cuando SQLite está
+  disponible; si no lo está, la recuperación ocurre al reiniciar el servicio.
+- Los reintentos del proveedor ocurren en `ctx.llamar`, reservando cuota en cada
+  intento y respetando cancelación, deadline y Retry-After. Un `ReintentableError`
+  fuera de esa llamada falla el trabajo sin repetir el pipeline ni sus efectos.
+- Las lápidas bloquean acceso mientras existan. `purga_despues_en` habilita limpieza,
+  no restaura recursos; solo retirar la lápida tras purgar todos sus derivados y
+  referencias reconstruibles. Las consultas también rechazan espacios vencidos.
+- `get_storage_provider(configuracion=ajustes)` consume la configuración validada
+  de la aplicación; sin inyección usa la misma carga de entorno y `.env`.
+- El parser v3 cuenta tokens con el BPE local e interpreta form feed como LF para
+  citas. La detección visual es heurística: ignora reglas/rellenos simples de tablas,
+  pero conserva imágenes y diagramas aun cuando coexistan con texto seleccionable.
+  La demo VCN mantiene pendiente su página 3 hasta integrar visión.
+- Faithfulness admite `rangos_excluidos=[(inicio, fin), ...]` sobre el texto original
+  (caracteres, fin exclusivo). Las exclusiones textuales ambiguas producen
+  `no_evaluable`; el caller debe suministrar posiciones exactas para evitar alterar
+  explicaciones que comparten palabras con un distractor.

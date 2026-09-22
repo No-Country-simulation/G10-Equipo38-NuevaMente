@@ -127,7 +127,9 @@ def test_rechazos_de_cuota_no_consumen_presupuesto():
 
 
 def test_retry_after_no_se_recorta(store):
-    gestor = GestorTrabajos(store, ControlesOperativos(deadline_ejecucion_segundos=0.1))
+    gestor = GestorTrabajos(
+        store, ControlesOperativos(deadline_ejecucion_segundos=0.1), cuotas=CuotasProveedor({"test": CuotasModelo()})
+    )
     intentos = []
     try:
 
@@ -135,7 +137,7 @@ def test_retry_after_no_se_recorta(store):
             intentos.append(1)
             raise ReintentableError("esperar", retry_after=10)
 
-        job = gestor.enqueue("ws_a", "chat", trabajo)
+        job = gestor.enqueue("ws_a", "chat", lambda ctx: ctx.llamar(lambda timeout: trabajo(ctx), modelo="test"))
         assert esperarlo(store, job, JobStatus.FAILED)["error_code"] == "DEADLINE"
         assert len(intentos) == 1
     finally:
@@ -184,7 +186,9 @@ def store(tmp_path) -> RegistroOperativo:
 
 @pytest.fixture
 def gestor(store) -> GestorTrabajos:
-    gesto = GestorTrabajos(store, controles=CONTROLES_RAPIDOS)
+    gesto = GestorTrabajos(
+        store, controles=CONTROLES_RAPIDOS, cuotas=CuotasProveedor({"test": CuotasModelo(rpm=100, rpd=100)})
+    )
     yield gesto
     gesto.detener()
 
@@ -392,7 +396,7 @@ def test_error_transitorio_reintenta_y_completa(gestor, store):
             raise ReintentableError("503 del proveedor")
         return "recuperado"
 
-    job_id = gestor.enqueue("ws_a", "chat", inestable)
+    job_id = gestor.enqueue("ws_a", "chat", lambda ctx: ctx.llamar(lambda timeout: inestable(ctx), modelo="test"))
     final = esperarlo(store, job_id, JobStatus.COMPLETED)
     assert intentos["n"] == 2
     assert final["resultado"] == '"recuperado"'
@@ -402,7 +406,7 @@ def test_reintentos_agotados_falla_con_codigo(gestor, store):
     def siempre_caida(contexto: ContextoEjecucion) -> str:
         raise ReintentableError("timeout de red")
 
-    job_id = gestor.enqueue("ws_a", "chat", siempre_caida)
+    job_id = gestor.enqueue("ws_a", "chat", lambda ctx: ctx.llamar(lambda timeout: siempre_caida(ctx), modelo="test"))
     final = esperarlo(store, job_id, JobStatus.FAILED, plazo=5)
     assert final["error_code"] == "REINTENTOS_AGOTADOS"
     # La columna cuenta REINTENTOS efectuados (§7.5: hasta dos), no el
@@ -469,7 +473,9 @@ def test_huerfanos_en_cola_se_marcan_al_arrancar(store):
     función ejecutable murió con él; el usuario reintenta con idempotencia)."""
     store.registrar_job("job_huerfano", "ws_a", "generacion")
 
-    gestor = GestorTrabajos(store, controles=CONTROLES_RAPIDOS)
+    gestor = GestorTrabajos(
+        store, controles=CONTROLES_RAPIDOS, cuotas=CuotasProveedor({"test": CuotasModelo(rpm=100, rpd=100)})
+    )
     try:
         huerfano = store.obtener_job("job_huerfano")
         assert huerfano["status"] == JobStatus.FAILED.value

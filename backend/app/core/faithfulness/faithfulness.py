@@ -147,6 +147,7 @@ class VerificadorFidelidad:
         contexto: str,
         distractores: list[str] | None = None,
         segmentos_etiquetados: list[str] | None = None,
+        rangos_excluidos: list[tuple[int, int]] | None = None,
     ) -> ResultadoFidelidad:
         """Evalúa `texto` contra `contexto` (la evidencia recuperada).
 
@@ -155,17 +156,46 @@ class VerificadorFidelidad:
           en el score.
         - `segmentos_etiquetados`: analogías/escenarios ficticios que el
           llamador marcó; no se juzgan (§19.2) y quedan registrados.
+        - `rangos_excluidos`: posiciones [inicio, fin) en el texto original.
+          Si se especifican, reemplazan la búsqueda textual. Usarlos para
+          opciones incrustadas o repetidas; nunca calcularlos sobre texto ya editado.
         """
         resultado = ResultadoFidelidad(estado=EstadoEvaluacion.NO_EVALUABLE, score=None)
         resultado.no_juzgados_etiquetados = list(segmentos_etiquetados or [])
         if not texto.strip() or not contexto.strip():
             resultado.diagnostico = "Falta contenido o evidencia para evaluar."
             return resultado
-        # El llamador identifica segmentos completos; retirar solo esa ocurrencia,
-        # conservando hechos repetidos en otras partes del contenido educativo.
-        for segmento in [*(distractores or []), *(segmentos_etiquetados or [])]:
-            if segmento.strip():
-                texto = texto.replace(segmento, "", 1)
+        rangos = list(rangos_excluidos or [])
+        if rangos_excluidos is None:
+            for segmento in [*(distractores or []), *(segmentos_etiquetados or [])]:
+                if not segmento.strip() or segmento not in texto:
+                    continue  # El caller puede entregar solo hechos y verificar distractores aparte.
+                posiciones = []
+                offset = 0
+                for linea in texto.splitlines(keepends=True):
+                    if linea.rstrip("\r\n") == segmento:
+                        posiciones.append((offset, offset + len(segmento)))
+                    offset += len(linea)
+                if len(posiciones) != 1 or texto.count(segmento) != 1:
+                    resultado.diagnostico = "Exclusión ambigua: indicar rangos exactos del contenido original."
+                    return resultado
+                rangos.extend(posiciones)
+        if any(not isinstance(r, (tuple, list)) or len(r) != 2 or any(type(x) is not int for x in r) for r in rangos):
+            resultado.diagnostico = "Rangos de exclusión inválidos."
+            return resultado
+        anterior = 0
+        for inicio, fin in sorted(rangos):
+            if (
+                type(inicio) is not int
+                or type(fin) is not int
+                or not 0 <= inicio < fin <= len(texto)
+                or inicio < anterior
+            ):
+                resultado.diagnostico = "Rangos de exclusión inválidos o superpuestos."
+                return resultado
+            anterior = fin
+        for inicio, fin in sorted(rangos, reverse=True):
+            texto = texto[:inicio] + " " + texto[fin:]
         if not texto.strip():
             resultado.diagnostico = "No quedan afirmaciones educativas fuera de los segmentos excluidos."
             return resultado
