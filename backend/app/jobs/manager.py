@@ -27,7 +27,7 @@ El modelo de cuotas de §7.5, en lenguaje llano:
   recibe su fecha límite al ARRANCAR; si la pasa, termina failed/DEADLINE.
 - ESPERA MÁXIMA en cola (300 s): un trabajo que nadie levantó en ese plazo
   expira con diagnóstico, sin ejecutarse.
-- REINTENTOS (2) para errores TRANSITORIOS, con backoff exponencial + jitter
+- REINTENTOS (2) por llamada TRANSITORIA en ctx.llamar, con backoff exponencial + jitter
   (espera creciente con un componente aleatorio para no sincronizar reintentos).
 
 Cancelación COOPERATIVA: el gestor no puede matar el hilo a mitad de
@@ -58,6 +58,7 @@ exponen rutas (contratos-api.md los exige autenticados).
 from __future__ import annotations
 
 import json
+import logging
 import random
 import threading
 import time
@@ -117,7 +118,8 @@ class RechazoCalidadError(Exception):
 class ReintentableError(Exception):
     """Error TRANSITORIO (red, 5xx del proveedor): reintenta con backoff.
 
-    Se espera que el proveedor real (#13) envuelva así sus fallos de red.
+    El proveedor (#13) envuelve así sus fallos de red dentro de ctx.llamar.
+    Fuera de esa operación el pipeline falla: no se repiten pasos exitosos.
     Los errores PERMANENTES (validación, lógica) deben usar excepciones
     normales: reintentarlos solo quema presupuesto.
     """
@@ -183,7 +185,7 @@ class CuotasProveedor:
         with self._lock:
             cuotas = self._cuotas.get(modelo)
             if cuotas is None:
-                # Sin límite configurado para el modelo: cuenta, no bloquea.
+                # Sin cuotas explícitas no se permite consumir el proveedor.
                 raise CuotaAgotadaError(f"Falta configurar cuotas para el modelo {modelo}")
 
             ventana_llamadas = self._llamadas.setdefault(modelo, deque())
@@ -243,6 +245,10 @@ class ContextoEjecucion:
     espacio_vigente: Callable[[], bool] = field(default=lambda: True, repr=False)
     _evento_cancelacion: threading.Event = field(repr=False, default_factory=threading.Event)
 
+    reintentos_transitorios: int = 2
+    base_backoff_segundos: float = 0.05
+    registrar_reintento: Callable[[], None] = field(default=lambda: None, repr=False)
+
     def cancelado(self) -> bool:
         return self._evento_cancelacion.is_set()
 
@@ -259,17 +265,29 @@ class ContextoEjecucion:
         La llamada conserva la ranura hasta retornar aunque se cancele.
         Cada intento del proveedor debe pasar por este método.
         """
-        self.chequear()
-        if self.cuotas is None:
-            raise CuotaAgotadaError("No hay cuotas configuradas")
-        self.cuotas.permitir(modelo, tokens_estimados)
-        timeout = min(self.timeout_por_llamada, self.deadline - time.monotonic())
-        inicio = time.monotonic()
-        resultado = funcion(timeout=timeout)
-        self.chequear()
-        if time.monotonic() - inicio > timeout:
-            raise ReintentableError("La llamada excedió su timeout")
-        return resultado
+        for intento in range(self.reintentos_transitorios + 1):
+            self.chequear()
+            if self.cuotas is None:
+                raise CuotaAgotadaError("No hay cuotas configuradas")
+            self.cuotas.permitir(modelo, tokens_estimados)
+            timeout = min(self.timeout_por_llamada, self.deadline - time.monotonic())
+            inicio = time.monotonic()
+            try:
+                resultado = funcion(timeout=timeout)
+                self.chequear()
+                if time.monotonic() - inicio > timeout:
+                    raise ReintentableError("La llamada excedió su timeout")
+                return resultado
+            except ReintentableError as error:
+                self.chequear()
+                if intento == self.reintentos_transitorios:
+                    raise
+                pausa = max(
+                    self.base_backoff_segundos * 2**intento * random.uniform(0.75, 1.25), error.retry_after or 0
+                )
+                self._evento_cancelacion.wait(min(pausa, max(0, self.deadline - time.monotonic())))
+                self.chequear()
+                self.registrar_reintento()
 
 
 @dataclass(frozen=True)
@@ -344,6 +362,7 @@ class GestorTrabajos:
         tipo: str,
         funcion: Callable[[ContextoEjecucion], Any],
         job_id: str | None = None,
+        generation_id: str | None = None,
     ) -> str:
         """Registra un trabajo y devuelve su job_id. Rechaza según §7.5.
 
@@ -366,8 +385,7 @@ class GestorTrabajos:
                 raise ColaLlenaError(en_cola, self.controles.max_en_cola)
 
             identificador = job_id or f"job_{uuid.uuid4().hex[:16]}"
-            self.store.registrar_job(identificador, workspace_id, tipo)
-            self.store.registrar_evento(workspace_id, "encolado", JobStatus.QUEUED, job_id=identificador)
+            self.store.encolar_job(identificador, workspace_id, tipo, generation_id=generation_id)
             self._ejecutables[identificador] = funcion
             self._cancelaciones[identificador] = threading.Event()
         self._despertar.set()
@@ -431,18 +449,27 @@ class GestorTrabajos:
         Espera activa mínima: duerme hasta que haya algo nuevo (`_despertar`)
         o hasta 1 s (para barrer expiraciones de cola).
         """
-        while self._activo:
-            self._despertar.wait(timeout=1.0)
-            self._despertar.clear()
-            if not self._activo:
-                break
+        try:
+            while self._activo:
+                self._despertar.wait(timeout=1.0)
+                self._despertar.clear()
+                if not self._activo:
+                    break
+                with self._lock:
+                    self._barrer_cola_expirada()
+                    siguiente = self.store.primer_job_encolado()
+                if siguiente is None:
+                    continue
+                self._ejecutar(siguiente)
+                self._despertar.set()  # Consumir inmediatamente los trabajos que ya esperan.
+        except Exception as error:
             with self._lock:
-                self._barrer_cola_expirada()
-                siguiente = self.store.primer_job_encolado()
-            if siguiente is None:
-                continue
-            self._ejecutar(siguiente)
-            self._despertar.set()  # Consumir inmediatamente los trabajos que ya esperan.
+                self._activo = False
+            logging.getLogger(__name__).error("Worker detenido por fallo de infraestructura: %s", type(error).__name__)
+            try:
+                self.store.marcar_huerfanos_como_interrumpidos()
+            except Exception:
+                logging.getLogger(__name__).error("Recuperación pendiente hasta restablecer el registro")
 
     def _barrer_cola_expirada(self) -> None:
         """Trabajos que esperaron más de la cuenta: failed/COLA_EXPIRADA."""
@@ -474,8 +501,7 @@ class GestorTrabajos:
                 return
             funcion = self._ejecutables.get(job_id)
             evento_cancelacion = self._cancelaciones.get(job_id, threading.Event())
-            self.store.actualizar_job(job_id, JobStatus.RUNNING)
-            self.store.registrar_evento(workspace_id, trabajo["tipo"], JobStatus.RUNNING, job_id=job_id)
+            self.store.iniciar_job(job_id)
         if funcion is None:
             # Ejecutable perdido (no debería pasar: el mismo proceso lo encoló).
             self._finalizar(job_id, JobStatus.FAILED, "El trabajo perdió su ejecutable.", error_code="ORFANO")
@@ -488,67 +514,63 @@ class GestorTrabajos:
             deadline=time.monotonic() + self.controles.deadline_ejecucion_segundos,
             timeout_por_llamada=self.controles.timeout_por_llamada_segundos,
             cuotas=self.cuotas,
-            espacio_vigente=lambda: self.store.obtener_workspace(workspace_id) is not None,
+            espacio_vigente=lambda: (
+                self.store.obtener_workspace(workspace_id) is not None
+                and (
+                    not trabajo.get("generation_id")
+                    or self.store.obtener_generacion(trabajo["generation_id"]) is not None
+                )
+            ),
+            reintentos_transitorios=self.controles.reintentos_transitorios,
+            base_backoff_segundos=self.controles.base_backoff_segundos,
+            registrar_reintento=lambda: self.store.actualizar_job(job_id, JobStatus.RUNNING, incremento_intentos=1),
             _evento_cancelacion=evento_cancelacion,
         )
 
-        intento = 0
-        while True:
-            intento += 1
-            try:
+        try:
+            contexto.chequear()
+            resultado = funcion(contexto)
+            with self._lock:
                 contexto.chequear()
-                resultado = funcion(contexto)
-                with self._lock:
-                    contexto.chequear()
-                    self._finalizar(job_id, JobStatus.COMPLETED, resultado=_serializar(resultado))
-                self._limpiar(job_id)
-                return
-            except RechazoCalidadError:
-                self._finalizar(job_id, JobStatus.REJECTED_QUALITY, "El contenido no superó la revisión de calidad.")
-                return
-            except TrabajoCanceladoError:
-                self._finalizar(job_id, JobStatus.CANCELLED, "Cancelado por el usuario durante la ejecución.")
-                self._limpiar(job_id)
-                return
-            except DeadlineExcedidoError:
-                self._finalizar(
-                    job_id,
-                    JobStatus.FAILED,
-                    f"El trabajo excedió el deadline de {self.controles.deadline_ejecucion_segundos:.0f} s de ejecución.",
-                    error_code="DEADLINE",
-                )
-                self._limpiar(job_id)
-                return
-            except CuotaAgotadaError as error:
-                # "La cuota diaria agotada detiene nuevas llamadas": falla el
-                # trabajo con causa técnica, sin ciclar reintentos (§7.5).
-                self._finalizar(job_id, JobStatus.FAILED, str(error), error_code="CUOTA_AGOTADA")
-                self._limpiar(job_id)
-                return
-            except ReintentableError as error:
-                if intento > self.controles.reintentos_transitorios:
-                    self._finalizar(
-                        job_id,
-                        JobStatus.FAILED,
-                        f"Error transitorio tras {intento} intentos.",
-                        error_code="REINTENTOS_AGOTADOS",
-                    )
-                    self._limpiar(job_id)
-                    return
-                # Backoff exponencial + jitter (±25%): 2^{-}? base*2^intento con
-                # componente aleatorio para no sincronizar reintentos (§7.5).
-                pausa = self.controles.base_backoff_segundos * (2 ** (intento - 1))
-                pausa *= random.uniform(0.75, 1.25)
-                pausa = max(pausa, error.retry_after or 0)
-                evento_cancelacion.wait(timeout=min(pausa, max(0, contexto.deadline - time.monotonic())))
-                self.store.actualizar_job(job_id, JobStatus.RUNNING, incremento_intentos=1)
-                continue
-            except Exception:  # noqa: BLE001 - el worker nunca debe morir
-                # Error PERMANENTE: sin reintento (reintentar validaciones no
-                # tiene sentido) y sin tragar la causa: queda en el registro.
-                self._finalizar(job_id, JobStatus.FAILED, "Error interno del trabajo.", error_code="ERROR_TRABAJO")
-                self._limpiar(job_id)
-                return
+                self._finalizar(job_id, JobStatus.COMPLETED, resultado=_serializar(resultado))
+            self._limpiar(job_id)
+            return
+        except RechazoCalidadError:
+            self._finalizar(job_id, JobStatus.REJECTED_QUALITY, "El contenido no superó la revisión de calidad.")
+            return
+        except TrabajoCanceladoError:
+            self._finalizar(job_id, JobStatus.CANCELLED, "Cancelado por el usuario durante la ejecución.")
+            self._limpiar(job_id)
+            return
+        except DeadlineExcedidoError:
+            self._finalizar(
+                job_id,
+                JobStatus.FAILED,
+                f"El trabajo excedió el deadline de {self.controles.deadline_ejecucion_segundos:.0f} s de ejecución.",
+                error_code="DEADLINE",
+            )
+            self._limpiar(job_id)
+            return
+        except CuotaAgotadaError as error:
+            # "La cuota diaria agotada detiene nuevas llamadas": falla el
+            # trabajo con causa técnica, sin ciclar reintentos (§7.5).
+            self._finalizar(job_id, JobStatus.FAILED, str(error), error_code="CUOTA_AGOTADA")
+            self._limpiar(job_id)
+            return
+        except ReintentableError:
+            self._finalizar(
+                job_id,
+                JobStatus.FAILED,
+                "Falló una operación transitoria; no se repite el trabajo completo.",
+                error_code="REINTENTOS_AGOTADOS",
+            )
+            return
+        except Exception:  # noqa: BLE001 - el worker nunca debe morir
+            # Error PERMANENTE: sin reintento (reintentar validaciones no
+            # tiene sentido) y sin tragar la causa: queda en el registro.
+            self._finalizar(job_id, JobStatus.FAILED, "Error interno del trabajo.", error_code="ERROR_TRABAJO")
+            self._limpiar(job_id)
+            return
 
     def _finalizar(
         self,

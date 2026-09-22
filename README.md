@@ -197,7 +197,7 @@ sus propios límites antes de enviar contenido. `ConfigChunker` permite ajustar
 los límites; un tokenizador alternativo debe declarar su identidad versionada.
 
 Las citas MD/TXT conservan líneas del cuerpo original (base 1). `start_index`
-es un desplazamiento en caracteres, normalizando BOM y saltos CRLF/CR a LF;
+es un desplazamiento en caracteres, normalizando BOM y saltos CRLF/CR/form feed a LF;
 en PDF es relativo a la página. El contexto repetido no altera estas posiciones.
 Los IDs incluyen espacio, documento, hash, configuración del parser/chunker y
 tokenizador. Pruebas: `pytest backend/tests/test_chunker.py`.

@@ -23,7 +23,7 @@ from datetime import datetime
 from math import isclose
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.enums import (
     DetailLevel,
@@ -34,7 +34,7 @@ from app.schemas.enums import (
     RecipientProfile,
 )
 from app.schemas.errors import ErrorBody
-from app.schemas.pedagogical import Alcance, ContenidoAdaptado, Referencia
+from app.schemas.pedagogical import Alcance, ContenidoAdaptado, ContenidoEstudiante, ModeloContenido, Referencia
 
 # Idioma de ORIGEN detectado del documento (§16.3): más ancho que
 # OutputLanguage porque la detección puede concluir "mixto" (§17.1 admite
@@ -43,7 +43,7 @@ from app.schemas.pedagogical import Alcance, ContenidoAdaptado, Referencia
 IdiomaOrigen = Literal["es", "en", "pt", "mixto"]
 
 
-class Metadatos(BaseModel):
+class Metadatos(ModeloContenido):
     """Ficha pedagógica del paquete (§16.3, tabla de metadatos).
 
     La UI usa estos campos para las tarjetas de resultado y para el estudio:
@@ -67,7 +67,7 @@ class Metadatos(BaseModel):
     alcance: Alcance = Field(description="Conserva la entrada y agrega secciones cubiertas.")
 
 
-class DocumentoFuente(BaseModel):
+class DocumentoFuente(ModeloContenido):
     """Identificación del documento del que nace el paquete.
 
     Permite verificar que dos generaciones vienen de la MISMA versión del
@@ -84,7 +84,7 @@ class DocumentoFuente(BaseModel):
     procedencia: str | None = Field(default=None, description="Procedencia declarada cuando está disponible.")
 
 
-class EvaluacionCalidad(BaseModel):
+class EvaluacionCalidad(ModeloContenido):
     """Evaluación factual, pedagógica y visual del contenido (§16.4).
 
     El score anti-alucinación vive UNICAMENTE aquí
@@ -142,7 +142,7 @@ class EvaluacionCalidad(BaseModel):
         return self
 
 
-class ConfiguracionRetrieval(BaseModel):
+class ConfiguracionRetrieval(ModeloContenido):
     """Parámetros de la búsqueda MMR usada al reunir evidencia (issue #18)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -152,7 +152,7 @@ class ConfiguracionRetrieval(BaseModel):
     lambda_mult: float = Field(ge=0.0, le=1.0, description="0 = máxima diversidad, 1 = máxima relevancia.")
 
 
-class Trazabilidad(BaseModel):
+class Trazabilidad(ModeloContenido):
     """Qué modelos y configuración produjeron el paquete (§16.3).
 
     Regla de privacidad: registra VERSIONES y evidencia, sin prompts
@@ -169,7 +169,7 @@ class Trazabilidad(BaseModel):
     retrieval: ConfiguracionRetrieval
 
 
-class AlmacenamientoOCI(BaseModel):
+class AlmacenamientoOCI(ModeloContenido):
     """Dónde vive el paquete canónico en Object Storage (§16.3).
 
     El canónico solo NOMINA bucket y objeto; no confirma su propia escritura
@@ -183,7 +183,7 @@ class AlmacenamientoOCI(BaseModel):
     objeto_id: str = Field(min_length=1, description="Ruta del objeto, p. ej. 'outputs/{ws}/gen_.../content.json'.")
 
 
-class PedagogicalOutput(BaseModel):
+class PaqueteEducativoBase(ModeloContenido):
     """El paquete educativo canónico completo (schema_version 1.0).
 
     Este es el contrato más importante del proyecto: Writer lo produce
@@ -210,7 +210,7 @@ class PedagogicalOutput(BaseModel):
     almacenamiento_oci: AlmacenamientoOCI
 
     @model_validator(mode="after")
-    def _paquete_aprobado_coherente(self) -> "PedagogicalOutput":
+    def _paquete_aprobado_coherente(self) -> "PaqueteEducativoBase":
         if self.evaluacion_calidad.estado_evaluacion != "aprobada":
             raise ValueError("El paquete canónico requiere evaluación aprobada")
         if self.metadatos.formato_generado.value != self.contenido_adaptado.tipo:
@@ -218,7 +218,24 @@ class PedagogicalOutput(BaseModel):
         return self
 
 
-class PersistenciaInfo(BaseModel):
+class PedagogicalOutput(PaqueteEducativoBase):
+    """Artefacto canónico con respuestas, reservado para persistencia/exportación."""
+
+
+class PedagogicalStudentOutput(PaqueteEducativoBase):
+    """Proyección pública; el paquete completo queda reservado para exportación autorizada."""
+
+    contenido_adaptado: ContenidoEstudiante
+
+    @classmethod
+    def desde_canonico(cls, paquete: PedagogicalOutput):
+        datos = paquete.model_dump()
+        if paquete.contenido_adaptado.tipo == "quiz":
+            datos["contenido_adaptado"] = paquete.contenido_adaptado.vista_estudiante().model_dump()
+        return cls.model_validate(datos)
+
+
+class PersistenciaInfo(ModeloContenido):
     """Estado de la escritura en OCI, SOLO en la respuesta del trabajo.
 
     ``status_upload="completado"`` es lo que el backend confirma verificando
@@ -233,10 +250,10 @@ class PersistenciaInfo(BaseModel):
     provider: Literal["oci", "mock"] = Field(description="Proveedor explícito; mock no acredita persistencia OCI (§8).")
 
 
-class GenerationJobResponse(BaseModel):
+class GenerationJobResponse(ModeloContenido):
     """Respuesta de GET /api/generations/{id}: el trabajo que transporta el paquete.
 
-    ``contenido`` (el PedagogicalOutput aprobado) solo existe cuando el
+    ``contenido`` (la proyección PedagogicalStudentOutput del aprobado) solo existe cuando el
     status es completed. Un rejected_quality se consulta con HTTP 200 y
     diagnóstico en ``error`` — el problema es del resultado, no de la
     consulta (§7.3).
@@ -250,13 +267,20 @@ class GenerationJobResponse(BaseModel):
     events_url: str = Field(description="URL del stream SSE de progreso (§3.3).")
     cancel_url: str | None = Field(default=None)
     posicion_cola: int | None = Field(default=None, ge=1, description="Visible mientras está en cola.")
-    contenido: PedagogicalOutput | None = Field(
+    contenido: PedagogicalStudentOutput | None = Field(
         default=None, description="Paquete aprobado; solo presente cuando status=completed."
     )
     persistencia: PersistenciaInfo | None = Field(
         default=None, description="Agregado por el backend cuando status=completed (§16.3)."
     )
     error: ErrorBody | None = Field(default=None, description="Diagnóstico terminal cuando aplica.")
+
+    @field_validator("contenido", mode="before")
+    @classmethod
+    def proyectar_contenido(cls, valor):
+        if isinstance(valor, PedagogicalOutput) and not isinstance(valor, PedagogicalStudentOutput):
+            return PedagogicalStudentOutput.desde_canonico(valor)
+        return valor
 
     @model_validator(mode="after")
     def _estado_y_contenido(self) -> "GenerationJobResponse":

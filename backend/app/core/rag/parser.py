@@ -3,7 +3,7 @@
 Qué hace este archivo: es la PUERTA DE ENTRADA de todo documento al sistema.
 Convierte un archivo (PDF, Markdown o TXT) o un texto pegado en un
 `ResultadoParseo`: texto por páginas, secciones con línea de origen, hash
-del original, estimación de tokens y un informe de COBERTURA (qué se pudo
+del original, conteo BPE de tokens y un informe de COBERTURA (qué se pudo
 procesar y qué no). Todo lo que viene después (chunker #12, embeddings #13,
 vectorstore #17) consume esta salida.
 
@@ -30,12 +30,8 @@ Reglas del plan que este módulo hace cumplir:
    de tiempo (por defecto 30 s) revisado página a página; si se agota, se
    rechaza con TIMEOUT_EXTRACCION en vez de colgar al usuario.
 
-Sobre la estimación de TOKENS: el límite de §4.1 es "100.000 tokens
-extraídos", pero el tokenizador real vive con el chunker (#12). Acá usamos
-una aproximación (máximo entre caracteres/4 y palabras×1.3, redondeado
-hacia arriba). No garantiza un límite de tokens real para todos los idiomas.
-El chunker aplica su límite por fragmento con un tokenizador BPE explícito;
-el adaptador del proveedor debe comprobar sus propios límites antes de enviar.
+El límite de tokens extraídos usa cl100k_base local (el mismo BPE del chunker).
+No equivale a la facturación ni al límite del proveedor, que valida su adaptador.
 
 Códigos de error: `ParserErrorCode` son códigos DE MÁQUINA estables de este
 módulo. La capa de API (#19) los mapea a los HTTP del contrato (413 para
@@ -49,7 +45,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import math
 import multiprocessing
 import re
 import time
@@ -60,6 +55,7 @@ from pathlib import Path
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from app.core.rag.tokenizer import TokenizadorBPE
 from app.schemas.enums import DocumentStatus
 
 # --------------------------------------------------------------------------
@@ -155,7 +151,7 @@ class SeccionTexto:
     linea_fin: int
     texto: str
     cuerpo_linea_inicio: int | None = None
-    start_index: int = 0  # Caracteres en el texto normalizado a LF, sin BOM.
+    start_index: int = 0  # Caracteres en el texto normalizado a LF (incluido form feed), sin BOM.
     encabezado: str | None = None
 
 
@@ -194,17 +190,8 @@ class ResultadoParseo:
 
 
 def estimar_tokens(texto: str) -> int:
-    """Aproximación de tokens (ver docstring del módulo).
-
-    Dos heurísticas y nos quedamos con la MÁXIMA: caracteres/4 (regla usual
-    para español/inglés) y palabras×1.3 (textos con muchas palabras cortas).
-    No constituye una cota superior garantizada del tokenizador del proveedor.
-    """
-    if not texto:
-        return 0
-    por_caracteres = math.ceil(len(texto) / 4)
-    por_palabras = math.ceil(len(texto.split()) * 1.3)
-    return max(por_caracteres, por_palabras)
+    """Conteo BPE local exacto; nombre conservado por compatibilidad."""
+    return TokenizadorBPE().contar(texto)
 
 
 def _firma_pdf(contenido: bytes) -> bool:
@@ -293,7 +280,7 @@ def _validar_texto_plano(contenido: bytes, extension: str, limites: LimitesInges
             f"El archivo .{extension} no es texto UTF-8 valido.",
             detalles={"detalle_tecnico": str(error), "sugerencia": "Guardar el archivo como UTF-8 y volver a subirlo."},
         ) from error
-    if any(ord(c) < 32 and c not in "\t\n\r" for c in texto) or "\x7f" in texto:
+    if any(ord(c) < 32 and c not in "\t\n\r\f" for c in texto) or "\x7f" in texto:
         raise ParserError(
             ParserErrorCode.BINARIO,
             f"El archivo .{extension} contiene bytes binarios (byte nulo); no es un documento de texto.",
@@ -363,6 +350,36 @@ def _pdf_aislado(contenido: bytes, titulo: str, limites: LimitesIngesta) -> Resu
         emisor.close()
 
 
+def _tiene_graficos_relevantes(operaciones) -> bool:
+    """Heurística conservadora: ignora reglas/tablas simples, no diagramas junto al texto.
+
+    No certifica ausencia de gráficos. Imágenes, curvas, diagonales y varios
+    recuadros trazados requieren revisión visual; rellenos de tabla y líneas
+    horizontales/verticales aisladas no bastan por sí solos.
+    """
+    punto = None
+    rectangulos = 0
+    rectangulos_trazados = 0
+    for args, op in operaciones:
+        if op in (b"Do", b"c", b"v", b"y", b"sh"):
+            return True
+        if op == b"m":
+            punto = (float(args[0]), float(args[1]))
+        elif op == b"l":
+            nuevo = (float(args[0]), float(args[1]))
+            if punto and abs(punto[0] - nuevo[0]) > 0.1 and abs(punto[1] - nuevo[1]) > 0.1:
+                return True
+            punto = nuevo
+        elif op == b"re":
+            rectangulos += 1
+        elif op in (b"S", b"s", b"B", b"B*", b"b", b"b*"):
+            rectangulos_trazados += rectangulos
+            punto, rectangulos = None, 0
+        elif op in (b"n", b"f", b"f*", b"F"):
+            punto, rectangulos = None, 0
+    return rectangulos_trazados >= 3
+
+
 def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta) -> ResultadoParseo:
     """Extrae texto por página de un PDF ya validado en firma y tamaño."""
     try:
@@ -419,8 +436,8 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
             texto = ""
         texto = texto.strip()
         contenido_pagina = pagina.get_contents()
-        operadores = [op for _, op in contenido_pagina.operations] if contenido_pagina is not None else []
-        visual = b"Do" in operadores or sum(op in (b"S", b"s", b"f", b"f*", b"B", b"B*") for op in operadores) >= 3
+        operaciones = contenido_pagina.operations if contenido_pagina is not None else []
+        visual = _tiene_graficos_relevantes(operaciones)
         if len(texto) < limites.minimo_caracteres_por_pagina or visual:
             # Sin texto extraíble => diagrama o escaneo => contrato visual #30.
             paginas_visuales.append(numero)
@@ -429,7 +446,7 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
         tokens_acumulados = estimar_tokens("\n".join(p.texto for p in paginas))
         if tokens_acumulados > limites.max_tokens_extraidos:
             raise _rechazo_limite(
-                ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens_acumulados, "tokens estimados"
+                ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens_acumulados, "tokens BPE"
             )
 
     if len(paginas_visuales) > limites.max_paginas_visuales:
@@ -444,7 +461,7 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
     tokens = estimar_tokens(texto_total)
     if tokens > limites.max_tokens_extraidos:
         # NUNCA truncar (§4.1): rechazo completo con código estable.
-        raise _rechazo_limite(ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens, "tokens estimados")
+        raise _rechazo_limite(ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens, "tokens BPE")
 
     # Documento escaneado puro (todas las páginas sin texto): NO se rechaza
     # por texto vacío (criterio del issue) — se deriva al contrato visual
@@ -466,7 +483,7 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
     elif tokens < limites.minimo_tokens_documento:
         raise ParserError(
             ParserErrorCode.EXTRACCION_INSUFICIENTE,
-            f"La extraccion del PDF '{titulo_etiqueta}' produjo demasiado poco texto ({tokens} tokens estimados).",
+            f"La extraccion del PDF '{titulo_etiqueta}' produjo demasiado poco texto ({tokens} tokens BPE).",
             detalles={"sugerencia": "Verificar que el PDF contenga texto seleccionable (no solo imagenes)."},
         )
     else:
@@ -477,7 +494,7 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
         f"Paginas procesadas con texto: {len(paginas)} de {cantidad_paginas}. "
         f"Paginas visuales pendientes (issue #30): {len(paginas_visuales)}"
         + (f" ({paginas_visuales})." if paginas_visuales else ".")
-        + f" Tokens estimados: {tokens:,}."
+        + f" Tokens BPE: {tokens:,}."
     )
     return ResultadoParseo(
         extension="pdf",
@@ -492,7 +509,7 @@ def _parsear_pdf(contenido: bytes, titulo_etiqueta: str, limites: LimitesIngesta
         detalle_estado=detalle,
         cobertura=cobertura,
         huella_config_parser=hashlib.sha256(
-            json.dumps({"version": "2", **asdict(limites)}, sort_keys=True).encode()
+            json.dumps({"version": "3", **asdict(limites)}, sort_keys=True).encode()
         ).hexdigest(),
     )
 
@@ -507,10 +524,10 @@ def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limit
     texto = _validar_texto_plano(contenido, extension, limites)
     if not texto.strip("\ufeff \t\n\r"):
         raise ParserError(ParserErrorCode.EXTRACCION_INSUFICIENTE, "El archivo no contiene texto para procesar.")
-    texto = texto.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    texto = texto.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")
     tokens = estimar_tokens(texto)
     if tokens > limites.max_tokens_extraidos:
-        raise _rechazo_limite(ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens, "tokens estimados")
+        raise _rechazo_limite(ParserErrorCode.LIMITE_TOKENS, limites.max_tokens_extraidos, tokens, "tokens BPE")
 
     secciones = (
         _secciones_markdown(texto)
@@ -527,7 +544,7 @@ def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limit
     )
     cobertura = (
         f"Documento de texto completo: {len(secciones)} seccion(es), "
-        f"{len(texto.splitlines())} lineas, {tokens:,} tokens estimados."
+        f"{len(texto.splitlines())} lineas, {tokens:,} tokens BPE."
     )
     return ResultadoParseo(
         extension=extension,
@@ -539,7 +556,7 @@ def _parsear_texto(contenido: bytes, titulo_etiqueta: str, extension: str, limit
         estado_documento=DocumentStatus.READY,
         cobertura=cobertura,
         huella_config_parser=hashlib.sha256(
-            json.dumps({"version": "2", **asdict(limites)}, sort_keys=True).encode()
+            json.dumps({"version": "3", **asdict(limites)}, sort_keys=True).encode()
         ).hexdigest(),
     )
 

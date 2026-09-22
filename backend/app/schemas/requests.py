@@ -12,19 +12,18 @@ Dos cosas que se repiten en todos:
   cerrada; aquí solo se combinan.
 
 Nota sobre alcance (§16.1): el documento completo es el default conceptual,
-pero este schema exige que el cliente lo diga explícito — sin valores
-ocultos que el frontend tenga que recordar.
+y omitir alcance selecciona documento_completo; una sección exige su ID.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
-from app.schemas.enums import DetailLevel, IndustryNiche, OutputLanguage, RecipientProfile
-from app.schemas.pedagogical import AlcanceSolicitud
+from app.schemas.enums import DetailLevel, IndustryNiche, OutputLanguage, PedagogicalFormat, RecipientProfile
+from app.schemas.pedagogical import AlcanceSolicitud, ModeloContenido
 
 
-class GenerateRequest(BaseModel):
+class GenerateRequest(ModeloContenido):
     """Body de POST /api/generate (§16.1: document_id + parámetros de adaptación).
 
       Devuelve 202 con generation_id y URLs (no el contenido): la generación
@@ -35,7 +34,7 @@ class GenerateRequest(BaseModel):
 
     document_id: str = Field(min_length=1, description="Documento ready del espacio (§7.2).")
     perfil_destinatario: RecipientProfile
-    formato_salida: Literal["tutorial", "flashcards", "quiz", "resumen_ejecutivo", "guion_clase"]
+    formato_salida: PedagogicalFormat
     nicho_sector: IndustryNiche
     nivel_detalle: DetailLevel
     idioma_salida: OutputLanguage
@@ -44,7 +43,7 @@ class GenerateRequest(BaseModel):
     )
 
 
-class UploadRequest(BaseModel):
+class UploadRequest(ModeloContenido):
     """Body JSON de POST /api/documents/upload para TEXTO PLANO (§16.1).
 
     "La carga de texto plano admite documento_titulo y documento_contenido;
@@ -62,7 +61,7 @@ class UploadRequest(BaseModel):
     documento_contenido: str = Field(min_length=1, description="No vacío; el parser aplica límites (#11).")
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(ModeloContenido):
     """Body de POST /api/chat (contratos-api.md, issues #37/#38).
 
     El chat es RAG sobre el documento activo: pregunta + mismo perfil e
@@ -78,7 +77,7 @@ class ChatRequest(BaseModel):
     idioma_salida: OutputLanguage
 
 
-class GlossaryRequest(BaseModel):
+class GlossaryRequest(ModeloContenido):
     """Body de POST /api/glossaries (issues #39/#40).
 
     202 con glossary_id y URLs del trabajo, o 200 directo si hay caché
@@ -93,7 +92,7 @@ class GlossaryRequest(BaseModel):
     idioma_salida: OutputLanguage
 
 
-class QuizAnswerRequest(BaseModel):
+class QuizAnswerRequest(ModeloContenido):
     """Body de POST /api/quizzes/{generation_id}/answers (issue #35).
 
     La corrección es determinista (comparar contra el aprobado) y NO gasta
@@ -108,7 +107,7 @@ class QuizAnswerRequest(BaseModel):
     event_id: str = Field(min_length=1, description="Identificador de evento idempotente.")
 
 
-class ProgressEvent(BaseModel):
+class ProgressEvent(ModeloContenido):
     """Body de POST /api/progress/events (issue #41): eventos de estudio idempotentes.
 
     Idempotencia por ``event_id`` estable: reintentar el mismo evento (p. ej.
