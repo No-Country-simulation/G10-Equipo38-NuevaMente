@@ -1,7 +1,7 @@
 # 🔌 Contratos API v1 — NuevaMente
 
-> **Estado**: especificación propuesta v1; Issue 03 la valida y congela con ejemplos ejecutables. Cambios posteriores requieren revisión contract-change.
-> **Fuente**: `decisiones_proyecto.md` §3.3, §7, §16, §17. La implementación viva es el OpenAPI en `/docs` (issue `Issue 59`).
+> **Estado**: contrato v1 **CONGELADO** por el issue `Issue 03`. Implementación viva: [`backend/app/schemas/`](../backend/app/schemas/) (Pydantic v2); ejemplos ejecutables: `backend/tests/test_schemas.py` (round-trip + rechazo de inválidos). Cambios posteriores requieren PR etiquetado `contract-change` con revisión API+UI+AGT+RAG y este documento actualizado en el mismo PR.
+> **Fuente**: `decisiones_proyecto.md` §3.3, §7, §16, §17. La referencia navegable por HTTP será el OpenAPI en `/docs` (issue `Issue 59`).
 > **Uso**: backend implementa contra este documento; frontend construye contra este documento. Ambos lo tratan como la interfaz compartida.
 
 ---
@@ -255,6 +255,89 @@ Notas de contrato:
 - alcance conserva la estructura de entrada y agrega secciones cubiertas; no alterna objeto/string según formato.
 - La respuesta HTTP del trabajo agrega `persistencia.status_upload` en el nivel del trabajo cuando `completed`.
 
+### Ejemplos válidos de `contenido_adaptado` por formato
+
+Estos JSON validan contra la implementación congelada; `backend/tests/test_schemas.py` los usa como fixtures, de modo que documento y código no pueden divergir en silencio. El ejemplo de `flashcards` es el del paquete completo de arriba.
+
+#### `quiz`
+
+```json
+{
+  "tipo": "quiz",
+  "titulo": "Quiz: fundamentos de VCN",
+  "preguntas": [
+    {
+      "id": "q_001",
+      "enunciado": "¿Qué delimita una VCN dentro de OCI?",
+      "opciones": [
+        { "option_id": "A", "texto": "Un rango CIDR elegido al crearla" },
+        { "option_id": "B", "texto": "El nombre de la región" },
+        { "option_id": "C", "texto": "La lista de usuarios" },
+        { "option_id": "D", "texto": "El tamaño del bucket" }
+      ],
+      "correct_option_id": "A",
+      "justificacion": "La VCN se define por su bloque CIDR; B, C y D no delimitan redes.",
+      "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+    }
+  ]
+}
+```
+
+#### `tutorial`
+
+```json
+{
+  "tipo": "tutorial",
+  "titulo": "Tu primera VCN en 3 pasos",
+  "audiencia": "Principiantes en cloud",
+  "prerrequisitos": ["Cuenta de OCI"],
+  "pasos": [
+    {
+      "id": "paso_1",
+      "instruccion": "Abre el menú de redes y elige 'Virtual Cloud Networks'.",
+      "resultado_esperado": "Ves la lista de VCNs del compartment.",
+      "verificacion": "El botón 'Create VCN' está habilitado.",
+      "codigo": null,
+      "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+    }
+  ]
+}
+```
+
+#### `resumen_ejecutivo`
+
+```json
+{
+  "tipo": "resumen_ejecutivo",
+  "titulo": "VCN para decisiones de negocio",
+  "puntos_clave": ["Una VCN aísla y organiza los recursos de red."],
+  "impacto_cualitativo": "Reduce riesgo de exposición sin costo adicional en Always Free.",
+  "implicaciones": ["Toda arquitectura nueva debe nacer dentro de una VCN."],
+  "acciones": ["Definir convención de rangos CIDR por ambiente."],
+  "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+}
+```
+
+#### `guion_clase`
+
+```json
+{
+  "tipo": "guion_clase",
+  "titulo": "Clase introductoria: redes en la nube",
+  "objetivos": ["Explicar el concepto de red virtual privada."],
+  "escenas": [
+    {
+      "id": "esc_1",
+      "duracion_min": 2.5,
+      "narracion": "Comencemos con una analogía: la ciudad y sus barrios...",
+      "puntos_diapositiva": ["VCN = barrio privado", "Aislamiento por diseño"],
+      "pregunta_interactiva": "¿Qué separaría un barrio de otro?",
+      "referencias": [{ "chunk_id": "chk_001", "pagina": 2, "seccion": "Conceptos" }]
+    }
+  ]
+}
+```
+
 ---
 
 ### Recuperación, rotación y borrado
@@ -268,3 +351,58 @@ La UI permite copiar/descargar el código una vez, rotarlo, cerrar sesión y bor
 3. Límites operativos (§7.5) se expresan vía 429 con `code` específico y mensaje con posición/expectativa.
 4. Todo listado es paginado (`limit`, `cursor`).
 5. Los nombres internos de clases pueden diferir; este JSON es el contrato público y sus claves no cambian sin `contract-change`.
+
+### Precisiones de validación de v1 (revisión de Issue 03)
+
+- `alcance` omitido selecciona `documento_completo`. `secciones_cubiertas` pertenece exclusivamente a la salida.
+- `concepto_revisado` exige `document_id` y `concepto`; `flashcard_vista` exige `generation_id` y `flashcard_id` (el `id` del ítem). Ambos requieren `event_id`.
+- `no_evaluable` admite cero afirmaciones y exige score nulo. En evaluaciones completas, el score es respaldadas/total. No se aprueban afirmaciones sin respaldo conocido, bloqueos ni verificaciones insuficientes (§19).
+- El paquete canónico exige evaluación aprobada y coincidencia entre formato declarado y contenido. Un trabajo solo entrega contenido en `completed`, con el mismo `generation_id` y persistencia confirmada. `persistencia.provider` es obligatorio: `mock` identifica almacenamiento local, sin acreditar OCI.
+- La reserva SQLite de idempotencia exige un `recurso_id` desde la primera llamada; los reintentos en curso reutilizan ese ID y completar la operación no puede cambiarlo. No se cachean credenciales.
+
+Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqueta `contract-change` al abrir el PR.
+
+
+### Precisiones de implementación tras la revisión de la base
+
+- `GenerationJobResponse.contenido` utiliza `PedagogicalStudentOutput`. Para quiz,
+  `contenido_adaptado` conserva `tipo: "quiz"`, título, introducción y preguntas
+  con ID/enunciado/opciones; no incluye la clave correcta ni justificaciones.
+  `PedagogicalStudentOutput.desde_canonico(paquete)` construye esa proyección.
+  El canónico `PedagogicalOutput` conserva todas las respuestas para almacenamiento
+  y exportación autorizada. Los otros cuatro formatos mantienen su estructura.
+- Los textos declarados y los elementos textuales de listas no admiten valores
+  vacíos ni compuestos solo por espacios. Las duraciones deben ser finitas y positivas.
+  `GenerateRequest.formato_salida` reutiliza `PedagogicalFormat` sin cambiar valores JSON.
+- Las rutas pueden lanzar `ErrorAplicacion(ErrorCode.QUEUE_FULL, mensaje, detalles)`
+  para conservar el código específico, su HTTP y `X-Request-ID`. `HTTPException`
+  conserva el mapeo genérico; no usar su `detail` para transportar códigos de dominio.
+- Esta precisión de esquemas públicos debe revisarse como `contract-change` en el PR.
+
+### Integración interna del registro y el ejecutor
+
+- SQLite migra automáticamente a v3: `jobs.generation_id` es opcional, único y
+  referencia una generación. `enqueue(..., generation_id=...)` vincula ambas
+  entidades; `running` y los estados terminales actualizan ambas en una transacción,
+  junto con el evento. El resultado canónico sigue perteneciendo a Object Storage.
+- `eventos_desde_job(job_id, ultimo_id)` recupera eventos comunes; `eventos_desde`
+  conserva el filtro por generación. La ruta debe comprobar ownership antes de leer.
+- Trabajo y evento inicial se aceptan atómicamente. Un fallo del ejecutor detiene
+  nuevas admisiones y marca los pendientes como interrumpidos cuando SQLite está
+  disponible; si no lo está, la recuperación ocurre al reiniciar el servicio.
+- Los reintentos del proveedor ocurren en `ctx.llamar`, reservando cuota en cada
+  intento y respetando cancelación, deadline y Retry-After. Un `ReintentableError`
+  fuera de esa llamada falla el trabajo sin repetir el pipeline ni sus efectos.
+- Las lápidas bloquean acceso mientras existan. `purga_despues_en` habilita limpieza,
+  no restaura recursos; solo retirar la lápida tras purgar todos sus derivados y
+  referencias reconstruibles. Las consultas también rechazan espacios vencidos.
+- `get_storage_provider(configuracion=ajustes)` consume la configuración validada
+  de la aplicación; sin inyección usa la misma carga de entorno y `.env`.
+- El parser v3 cuenta tokens con el BPE local e interpreta form feed como LF para
+  citas. La detección visual es heurística: ignora reglas/rellenos simples de tablas,
+  pero conserva imágenes y diagramas aun cuando coexistan con texto seleccionable.
+  La demo VCN mantiene pendiente su página 3 hasta integrar visión.
+- Faithfulness admite `rangos_excluidos=[(inicio, fin), ...]` sobre el texto original
+  (caracteres, fin exclusivo). Las exclusiones textuales ambiguas producen
+  `no_evaluable`; el caller debe suministrar posiciones exactas para evitar alterar
+  explicaciones que comparten palabras con un distractor.

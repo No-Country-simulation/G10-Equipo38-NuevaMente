@@ -1,5 +1,7 @@
 # 🎓 NuevaMente — Sistema Inteligente de Adaptación y Generación de Contenido Educativo
 
+[![CI](https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente/actions/workflows/ci.yml?query=branch%3Adevelop)
+
 > **Hackathon Oracle Next Education (ONE) — Alura Latam**  
 > **Grupo 10 · Equipo 38**  
 > **Sector Empresarial**: EdTech / Capacitación Corporativa / Plataformas de Educación Técnica  
@@ -148,6 +150,57 @@ Inspirado en la interfaz de Linear (`awesome-design-md`):
    - *Formato*: Resumen Ejecutivo (TL;DR) + Quiz de comprensión gerencial.
 
 ---
+
+## ⚙️ Estructura del Repositorio y Ejecución
+
+Monorepo con dos servicios esqueleto (sección 15 de `decisiones_proyecto.md`): `backend/` (FastAPI, paquete `app`) y `frontend/` (Streamlit). Flujo Git: `main` protegida (solo PRs) ← `develop` (integración) ← `feature/<nombre>`.
+
+```bash
+# 1. Clonar y crear entorno virtual (Python 3.11)
+git clone https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente.git
+cd G10-Equipo38-NuevaMente
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# 2. Instalar dependencias fijadas (desde la raíz): servicios + herramientas de desarrollo
+pip install -r backend/requirements.txt -r frontend/requirements.txt -r requirements-dev.txt
+
+# 3. Verificar el esqueleto del backend (paquete importable)
+cd backend && python -c "import app" && cd ..
+
+# 4. Variables de entorno: copiar template y completar placeholders (Apéndice A)
+cp .env.example .env
+
+# 5. Los mismos chequeos que corre la CI en cada PR (ruff + pytest, ambos desde la raíz)
+ruff check .
+ruff format --check .
+pytest
+
+# 6. Compose preliminar (esqueleto; endurecimiento con el issue #26)
+docker compose build
+```
+
+---
+
+## Segmentación de documentos (issue #12)
+
+`app.core.rag.chunker.trocear(resultado_parseo, workspace_id, document_id)`
+produce fragmentos con IDs deterministas y metadatos listos para Chroma mediante
+`metadatos_chroma()`. El objetivo es 750 tokens, con hasta 120 de solapamiento
+y techo de 825 incluyendo encabezados, cercas y contexto repetido.
+Se respetan secciones y páginas; las tablas partidas repiten sus cabeceras.
+Una fila que no cabe se rechaza con `ChunkingError`, sin truncarla.
+
+El tokenizador BPE `cl100k_base` y su vocabulario se incluyen localmente para
+funcionar sin red. Es una medida de segmentación: el cliente Gemini debe validar
+sus propios límites antes de enviar contenido. `ConfigChunker` permite ajustar
+los límites; un tokenizador alternativo debe declarar su identidad versionada.
+
+Las citas MD/TXT conservan líneas del cuerpo original (base 1). `start_index`
+es un desplazamiento en caracteres, normalizando BOM y saltos CRLF/CR/form feed a LF;
+en PDF es relativo a la página. El contexto repetido no altera estas posiciones.
+Los IDs incluyen espacio, documento, hash, configuración del parser/chunker y
+tokenizador. Pruebas: `pytest backend/tests/test_chunker.py`.
 
 ## 🤖 Catálogo de Skills para Agentes de IA
 

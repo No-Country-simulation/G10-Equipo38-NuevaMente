@@ -1,0 +1,40 @@
+# =============================================================================
+# Dependencias de DESARROLLO y CI (issue #02).
+#
+# Diferencia con backend/requirements.txt y frontend/requirements.txt: esos
+# dos archivos son lo que necesita cada SERVICIO para correr en producción;
+# este archivo es lo que necesita una PERSONA (o la CI) para desarrollar y
+# verificar: linter, formateador y runner de tests. Por eso vive en la raíz.
+#
+# Misma politica que el resto del repo (decisiones_proyecto.md 12.3/14.3):
+# versiones EXACTAS con "==" — la CI ademas lo verifica automaticamente con
+# .github/scripts/check_pinned_requirements.py. Actualizar una version es un
+# cambio deliberado, nunca un "pip install --upgrade" accidental.
+# =============================================================================
+
+# Linter y formateador. Su configuracion vive en ruff.toml (raiz):
+# 120 columnas, target py311, reglas E4/E7/E9/F/I.
+ruff==0.16.8
+
+# Runner de tests. Se ejecuta siempre desde la raiz del repo; pytest.ini
+# define donde estan los tests y que rutas de import agregar.
+pytest==9.1.1
+
+# Generador del documento demo PDF (documents/generar_pdf_vcn.py, issue #05).
+# Es herramienta de documentacion, no dependencia de los servicios en runtime.
+reportlab==5.0.1
+
+# Infraestructura de tests (issue #10):
+# - pytest-asyncio: corrida de tests async def (asyncio_mode=auto en pytest.ini).
+pytest-asyncio==1.4.0
+# - httpx: cliente HTTP de la sesion de API en memoria (conftest raiz); tambien
+#   respalda TestClient del esqueleto FastAPI (#07): sin ella, la importacion
+#   de starlette.testclient explota en entornos limpios como la CI.
+httpx==0.28.1
+# - pypdf: verificacion/extraccion de PDFs en fixtures y generacion del cifrado.
+pypdf==6.19.0
+# - chromadb: prueba de indexacion de los embeddings del doble (ephemeral, sin red).
+chromadb==1.5.9
+
+# Plugins de pytest (cobertura, etc.): se anadiran con version exacta
+# en el momento en que los tests de cada issue los necesiten — no antes.

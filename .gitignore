@@ -21,18 +21,44 @@ var/
 wheels/
 *.egg-info/
 
-# Environment and Secrets
+# Environment and Secrets (§11.2: .env, .pem y .key fuera de Git)
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
 oci_api_key*.pem
 
-# Application Data & ChromaDB
+# Application Data, índices y bases locales (§11.2: índices, SQLite y subidas fuera de Git)
 .data/
+.data*/
 *.chroma
+chroma_db/
 .cache/
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+uploads/
+**/uploads/
+
+# Logs
+*.log
+logs/
+
+# Herramientas
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # Streamlit
 .streamlit/secrets.toml
@@ -42,4 +68,3 @@ oci_api_key*.pem
 .idea/
 .DS_Store
 Thumbs.db
-
