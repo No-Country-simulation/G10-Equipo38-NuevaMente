@@ -6,10 +6,10 @@ y regenerarlo tiene que ser reproducible y auditable. Este script usa
 ReportLab (decisión del issue: "Generado con ReportLab/LaTeX para control
 total del contenido") y produce 10-12 páginas A4 con:
 
-- Los conceptos que los escenarios A/B/C enseñan (cruce con
-  docs/demo-escenarios.md): VCN y CIDR, subredes públicas/privadas,
+- Los conceptos que los escenarios A/B/C enseñan:
+  VCN y CIDR, subredes públicas/privadas,
   gateways (Internet, NAT, Service), security lists vs NSG y tablas de
-  ruteo. Si demo-escenarios.md agrega un concepto, se agrega aquí.
+  ruteo.
 - Un DIAGRAMA DE ARQUITECTURA dibujado con primitivas vectoriales
   (rectángulos, flechas, texto) en vez de una imagen bitmap: al ser
   vectores, rasteriza nítido a cualquier zoom — requisito del diferencial

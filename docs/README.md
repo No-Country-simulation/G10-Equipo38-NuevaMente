@@ -7,7 +7,6 @@
 | [`arquitectura.md`](arquitectura.md) | Diagramas del sistema: contexto, contenedores, flujo E2E, RAG, grafo multi-agente, fidelidad, persistencia y despliegue | Onboarding, diseño y base del README final |
 | [`contratos-api.md`](contratos-api.md) | Contrato API v1: rutas, envolvente de errores, enums, SSE, `PedagogicalOutput` con ejemplo completo | Contrato compartido backend/frontend; cambios = `contract-change` |
 | [`guia-trabajo-equipo.md`](guia-trabajo-equipo.md) | Git flow, conventional commits, PRs, tablero, ceremonias y reglas de convivencia entre carriles | Desde el día 1 y en cada PR |
-| [`demo-escenarios.md`](demo-escenarios.md) | Escenarios A/B/C, guion minuto a minuto, checklist de evidencias, contingencias | Al ensayar y presentar la entrega |
 | [`../decisiones_proyecto.md`](../decisiones_proyecto.md) | **Documento padre**: todas las decisiones de diseño con su justificación | Referencia normativa de todo lo demás |
 
 ## Mantenimiento
