@@ -125,7 +125,7 @@ graph TD
 - `documents/redes_vcn_oci.pdf`: documento sobre VCN en OCI con **un diagrama de arquitectura legible** (requisito para el diferencial multimodal), conceptos: VCN, subredes, gateways, security lists, tablas de ruteo. Generado con ReportLab/LaTeX para control total del contenido; 8–15 páginas.
 - `documents/integracion_apis_pagos.md`: guía técnica de integración de APIs de pago (nicho Fintech), con tablas y bloques de código.
 - `documents/gobernanza_datos_salud.md`: marco de gobernanza de datos de salud con **ejemplos ficticios** y cero datos personales reales.
-- Verificar que el documento VCN contiene todos los conceptos que los 3 escenarios van a enseñar (cruzar con `docs/demo-escenarios.md`).
+- Verificar que el documento VCN contiene todos los conceptos que los 3 escenarios van a enseñar.
 - Incluir un caso de prueba negativo: una sección deliberadamente insuficiente para evidenciar el bloqueo por calidad en la demo.
 
 **Criterios de aceptación**:

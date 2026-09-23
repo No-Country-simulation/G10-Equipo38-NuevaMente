@@ -33,7 +33,6 @@ Este plan traduce el documento de decisiones en **60 issues concretos**, organiz
 | [`docs/arquitectura.md`](arquitectura.md) | Arquitectura con diagramas (fuente del README final) |
 | [`docs/contratos-api.md`](contratos-api.md) | Contrato API v1 con ejemplos — base para trabajo paralelo frontend/backend |
 | [`docs/guia-trabajo-equipo.md`](guia-trabajo-equipo.md) | Git flow, commits, PRs, ceremonias y reglas del equipo |
-| [`docs/demo-escenarios.md`](demo-escenarios.md) | Escenarios de demostración y evidencias de diferenciales |
 
 **Flujo de trabajo del equipo:**
 
@@ -329,7 +328,7 @@ Un issue está **Done** cuando **todo** esto es cierto (además de sus criterios
 | Dependencias sin wheels ARM64 | Imágenes Docker no construyen en la VM | `Issue 26` valida la construcción multi-arch temprano antes del cierre de infraestructura |
 | Buffering del proxy mata el SSE | Progreso en vivo no se ve | `Issue 48` incluye la configuración de flush de Caddy y su prueba explícita |
 | Deriva de contratos entre carriles | Integración rota tarde | `Issue 03` congelado + regla de revisión multi-carril para cambios de contrato + CI que valida schemas |
-| Rechazos por calidad en la demo | Escenario incómodo en vivo | La demo usa resultados ya aprobados (`Issue 55`) + un caso intencional de rechazo como parte del guion (`docs/demo-escenarios.md`) |
+| Rechazos por calidad en la demo | Escenario incómodo en vivo | La demo usa resultados ya aprobados (`Issue 55`) + un caso intencional de rechazo como parte del guion |
 | Pérdida del código de recuperación en la demo | No se puede reingresar al espacio | El guion de demo incluye guardado del código como paso 0; recuperación ensayada en `Issue 53` |
 
 ---

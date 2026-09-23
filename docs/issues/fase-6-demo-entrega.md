@@ -79,7 +79,7 @@ graph TD
 ### `Issue 56` — Guion de demo, grabación de respaldo y evidencias
 **F6** · **QAD** · **M** · **Depende de**: `Issue 55`, `Issue 53`, `Issue 54`, `Issue 60` · **Referencia**: decisiones_proyecto.md §18.2, §18.3
 
-**Objetivo**: guion minuto a minuto ensayado, con grabación de respaldo y la evidencia de cada diferencial (detalle en [`docs/demo-escenarios.md`](../demo-escenarios.md)).
+**Objetivo**: guion minuto a minuto ensayado, con grabación de respaldo y la evidencia de cada diferencial.
 
 **Tareas**:
 - Guion de 10–12 min: presentación → carga/generación **en vivo real** con persistencia OCI → escenarios A/B/C → quiz interactivo → multimodal (diagrama + fuente) → exportaciones (PDF + Anki) → recuperación con código → caso de rechazo intencional → cierre.
