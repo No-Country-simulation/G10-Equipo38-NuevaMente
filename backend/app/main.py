@@ -44,6 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.routes import workspaces
 from app.config import Configuracion, config
 from app.schemas.errors import ErrorAplicacion, ErrorBody, ErrorCode, ErrorResponse
 
@@ -246,6 +247,8 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         puede tirar el servicio por una dependencia externa lenta.
         """
         return {"status": "ok", "version": app.version}
+
+    app.include_router(workspaces.router)
 
     return app
 

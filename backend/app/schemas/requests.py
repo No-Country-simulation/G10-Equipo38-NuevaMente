@@ -17,7 +17,7 @@ y omitir alcance selecciona documento_completo; una sección exige su ID.
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.enums import DetailLevel, IndustryNiche, OutputLanguage, PedagogicalFormat, RecipientProfile
 from app.schemas.pedagogical import AlcanceSolicitud, ModeloContenido
@@ -143,3 +143,9 @@ class ProgressEvent(ModeloContenido):
         if self.tipo == "flashcard_vista" and (not self.generation_id or not self.flashcard_id):
             raise ValueError("flashcard_vista exige generation_id y flashcard_id")
         return self
+
+
+class RecoverSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recovery_code: str = Field(description="Código de recuperación del espacio")
