@@ -378,6 +378,16 @@ class RegistroOperativo:
             return None
         return dict(fila)
 
+    @_sincronizado
+    def resolver_workspace(self, codigo_recuperacion: str) -> dict | None:
+        """Datos del espacio, o None si no existe o fue borrado (lápida)."""
+        fila = self._conn.execute(
+            "SELECT * FROM workspaces WHERE codigo_hash = ?", (_hash_de(codigo_recuperacion),)
+        ).fetchone()
+        if fila is None or fila["borrado_en"] is not None or datetime.fromisoformat(fila["expira_en"]) <= _ahora():
+            return None
+        return dict(fila)
+
     def borrar_workspace(self, workspace_id: str) -> None:
         """Borrado de espacio completo (DELETE /api/workspaces/current, §7.1 y §8.5).
 
@@ -400,6 +410,51 @@ class RegistroOperativo:
                 )
                 self.revocar_sesiones_de_workspace(workspace_id)
                 self.agendar_borrado("workspace", workspace_id, workspace_id)
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+    def ejecutar_rotacion_transaccional(
+        self,
+        workspace_id: str,
+        nuevo_codigo_recuperacion: str,
+        nuevo_token: str,
+        nueva_version: int,
+        dias_validez_ws: int,
+        horas_validez_sesion: int,
+    ) -> None:
+        """
+        Ejecuta la rotación completa de credenciales en una operación atómica.
+        Invalida el código anterior, revoca sesiones y guarda los nuevos accesos.
+        """
+
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                # 1. Revocar TODAS las sesiones previas del espacio
+                self.revocar_sesiones_de_workspace(workspace_id)
+
+                # 2. Actualizar el código, renovar expiración e incrementar versión
+                self._conn.execute(
+                    """
+                    UPDATE workspaces 
+                    SET codigo_hash = ?, 
+                        expira_en = ?, 
+                        version_manifiesto = ?
+                    WHERE workspace_id = ?
+                    """,
+                    (
+                        _hash_de(nuevo_codigo_recuperacion),
+                        _iso(_ahora() + timedelta(days=dias_validez_ws)),
+                        nueva_version,
+                        workspace_id,
+                    ),
+                )
+
+                # 3. Registrar el hash de la nueva sesión generada
+                self.crear_sesion(nuevo_token, workspace_id, horas_validez_sesion)
+
                 self._conn.execute("COMMIT")
             except Exception:
                 self._conn.execute("ROLLBACK")

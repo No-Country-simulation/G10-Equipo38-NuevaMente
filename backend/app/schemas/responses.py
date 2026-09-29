@@ -23,7 +23,7 @@ from datetime import datetime
 from math import isclose
 from typing import Literal
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.enums import (
     DetailLevel,
@@ -294,3 +294,21 @@ class GenerationJobResponse(ModeloContenido):
         if self.posicion_cola is not None and self.status != JobStatus.QUEUED:
             raise ValueError("Solo queued tiene posición de cola")
         return self
+
+
+class SessionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str = Field(description="Identificador UUID del espacio")
+    token: str = Field(description="Token de sesión opaco de 256 bits")
+
+
+class WorkspaceCreatedResponse(SessionResponse):
+    recovery_code: str = Field(description="Código de recuperación de 128 bits (agrupado)")
+
+
+class RotatedCodeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recovery_code: str = Field(description="Código de recuperación de 128 bits (agrupado)")
+    token: str = Field(description="Token de sesión opaco de 256 bits")
