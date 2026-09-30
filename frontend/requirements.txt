@@ -2,3 +2,5 @@
 # - Versiones exactas con "==" fijadas por cambio explícito; nunca rangos ni floating.
 # - Cada adición llega con su issue correspondiente y su verificación en CI.
 # - Sin dependencias aún: Streamlit se añade con el issue #15.
+streamlit==1.51.0
+requests==2.31.0
