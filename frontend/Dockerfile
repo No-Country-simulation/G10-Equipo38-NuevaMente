@@ -14,4 +14,7 @@ COPY components/ ./components/
 COPY i18n/ ./i18n/
 COPY pages/ ./pages/
 
+COPY .streamlit/ .streamlit/
+COPY app.py .
+
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0"]
