@@ -14,5 +14,7 @@ COPY components/ ./components/
 COPY i18n/ ./i18n/
 COPY pages/ ./pages/
 
-# Sin punto de entrada aún: app.py llega con el issue #15.
-CMD ["python", "-c", "print('frontend: esqueleto importable (app.py llega con el issue #15)')"]
+COPY .streamlit/ .streamlit/
+COPY app.py .
+
+CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0"]
