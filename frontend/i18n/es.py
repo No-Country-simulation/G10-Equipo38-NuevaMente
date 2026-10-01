@@ -63,6 +63,7 @@ CATALOGO_ES: dict[str, str] = {
     "onboarding.recuperar_titulo": "Recuperar mi espacio",
     "onboarding.recuperar_ayuda": "Pegá el código que guardaste al crear el espacio.",
     "onboarding.recuperar_boton": "Entrar con mi código",
+    "onboarding.demo": "Probar documento demo",
     # ------------------------- sidebar -------------------------
     "sidebar.titulo": "Parámetros de adaptación",
     "sidebar.documento": "Documento fuente",
@@ -77,6 +78,7 @@ CATALOGO_ES: dict[str, str] = {
     "sidebar.seccion": "Sección",
     "sidebar.generar": "Generar material",
     "sidebar.generando": "Generando…",
+    "sidebar.idioma_ui": "Idioma de la interfaz",
     # ------------------------- upload -------------------------
     "upload.titulo": "Cargar un documento",
     "upload.arrastrar": "Arrastrá acá un PDF, Markdown o TXT",

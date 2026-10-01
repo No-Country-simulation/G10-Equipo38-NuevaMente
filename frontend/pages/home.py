@@ -15,7 +15,7 @@ def render():
 
         # Selector de idioma de UI
         nuevo_idioma = st.selectbox(
-            t("sidebar.idioma_salida", idioma_actual),
+            t("sidebar.idioma_ui", idioma_actual),
             options=CATALOGOS.keys(),
             index=list(CATALOGOS.keys()).index(idioma_actual),
             format_func=lambda x: t(f"idioma.{x}", idioma_actual),
@@ -28,8 +28,8 @@ def render():
             st.rerun()
 
         st.divider()
-        st.markdown(f"### {t('sidebar.titulo', idioma_actual)} (Placeholder)")
-        st.markdown(f"### {t('upload.titulo', idioma_actual)} (Placeholder)")
+        st.markdown(f"### {t('sidebar.titulo', idioma_actual)}")
+        st.markdown(f"### {t('upload.titulo', idioma_actual)}")
 
         # Expander para el historial
         with st.expander(t("nav.historial", idioma_actual)):
@@ -52,7 +52,7 @@ def render():
             pass
     with col3:
         # Crear espacio (Demo)
-        if st.button(t("onboarding.crear_espacio", idioma_actual), use_container_width=True):
+        if st.button(t("onboarding.demo", idioma_actual), use_container_width=True):
             pass
     with col4:
         # Recuperar espacio
