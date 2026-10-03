@@ -44,7 +44,6 @@ def test_crear_y_recuperar_espacio(cliente):
     resp_creacion = cliente.post("/api/workspaces")
     assert resp_creacion.status_code == 201
     datos_creacion = resp_creacion.json()
-
     workspace_id = datos_creacion["workspace_id"]
     codigo_recuperacion = datos_creacion["recovery_code"]
     token_inicial = datos_creacion["token"]
@@ -198,3 +197,25 @@ def test_rotacion_concurrente_conflicto_if_match(cliente):
             "/api/workspaces/current/recovery-code", headers={"Authorization": f"Bearer {token}"}
         )
         assert resp_rotacion.status_code in [400, 409, 500]
+
+
+def test_aislamiento_entre_instancias(tmp_path):
+    """Prueba Punto 3: Pide tmp_path directamente para fabricar 2 clientes independientes."""
+    ruta_app1 = tmp_path / "app1"
+    ruta_app2 = tmp_path / "app2"
+
+    # Se crean dos instancias independientes
+    app1 = crear_app(config_desarrollo(data_dir=str(ruta_app1)))
+    app2 = crear_app(config_desarrollo(data_dir=str(ruta_app2)))
+
+    client1 = TestClient(app1, raise_server_exceptions=False)
+    client2 = TestClient(app2, raise_server_exceptions=False)
+
+    # Crear token en App 1
+    resp1 = client1.post("/api/workspaces")
+    token1 = resp1.json()["token"]
+
+    # Intentar usar el token de App 1 en App 2 (debe ser rechazado con 401)
+    resp2 = client2.delete("/api/sessions/current", headers={"Authorization": f"Bearer {token1}"})
+    print(resp2.text)
+    assert resp2.status_code == 401
