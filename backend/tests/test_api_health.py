@@ -23,9 +23,12 @@ llama a la app sin abrir puerto ni red — FastAPI lo incluye para tests.
 servidor y devolver la respuesta 500 tal como la vería un cliente real.
 """
 
+from unittest.mock import Mock
+
 import pytest
 from app.config import Configuracion, ConfiguracionIncompleta
 from app.main import CABECERA_REQUEST_ID, crear_app
+from app.storage.provider import StorageProvider
 from fastapi.testclient import TestClient
 
 # Marca del módulo completo: estos tests son de unidad (sin red, sin IO).
@@ -125,12 +128,17 @@ def test_produccion_incompleta_falla_al_arrancar_con_mensaje_accionable():
     assert "MOCK_OCI=1" in mensaje
 
 
-def test_produccion_completa_arranca(tmp_path):
-    """Camino positivo: producción con config real llega a construir la app.
-    OCI_CONFIG_FILE debe apuntar a un archivo existente (la validación
-    crítica lo exige), así que el test crea uno temporal."""
+def test_produccion_completa_arranca(tmp_path, monkeypatch):
+    """Config completa pasa la validación de producción con storage aislado.
+
+    El doble se inyecta solo en este test: no habilita mocks en producción
+    real ni prueba la integración OCI. Health no debe consultar storage.
+    """
     archivo_credenciales = tmp_path / "config"
     archivo_credenciales.write_text("[DEFAULT]\nuser=falso\n", encoding="utf-8")
+    proveedor = Mock(spec=StorageProvider)
+    fabrica = Mock(return_value=proveedor)
+    monkeypatch.setattr("app.main.get_storage_provider", fabrica)
     app = crear_app(
         Configuracion(
             app_env="production",
@@ -141,10 +149,13 @@ def test_produccion_completa_arranca(tmp_path):
             oci_compartment_id="ocid1.compartment.oc1..x",
             oci_region="us-ashburn-1",
             oci_config_file=str(archivo_credenciales),
+            data_dir=str(tmp_path / "datos"),
         )
     )
+    fabrica.assert_called_once_with(configuracion=app.state.config)
     with TestClient(app) as cliente:
         assert cliente.get("/api/health").status_code == 200
+    assert proveedor.mock_calls == []
 
 
 def test_produccion_rechaza_mocks():
