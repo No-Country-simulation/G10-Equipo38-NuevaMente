@@ -63,7 +63,7 @@ from app.schemas.enums import DocumentStatus, JobStatus
 # Versión actual del esquema. Cada cambio de esquema agrega una entrada a
 # MIGRACIONES y sube este número; NUNCA se edita una migración ya aplicada
 # (las bases reales de los usuarios quedaron con la vieja).
-VERSION_ESQUEMA = 3
+VERSION_ESQUEMA = 4
 
 # Cada migración: (versión, SQL). Se aplican en orden ascendente dentro de
 # una transacción cada una. La v1 crea todas las tablas del issue #08.
@@ -199,6 +199,13 @@ MIGRACIONES: list[tuple[int, str]] = [
         CREATE UNIQUE INDEX idx_jobs_generation ON jobs(generation_id);
         CREATE INDEX idx_events_job ON events(job_id, id);
     """,
+    ),
+    (
+        4,
+        """
+        -- Índice para optimizar búsquedas por hash de recuperación en resolver_workspace (§7.4, Issue 09)
+        CREATE INDEX idx_workspaces_codigo_hash ON workspaces(codigo_hash);
+        """,
     ),
 ]
 
