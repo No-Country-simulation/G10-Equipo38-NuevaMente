@@ -53,6 +53,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -354,6 +355,21 @@ class RegistroOperativo:
             )
             return cursor.rowcount
 
+    @contextmanager
+    def transaccion(self):
+        """
+        Context manager para agrupar operaciones atómicas en SQLite.
+        Mantiene el lock de escrituras y maneja BEGIN/COMMIT/ROLLBACK.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
     # ------------------------------------------------------------------
     # Workspaces
     # ------------------------------------------------------------------
@@ -415,7 +431,42 @@ class RegistroOperativo:
                 self._conn.execute("ROLLBACK")
                 raise
 
-    def ejecutar_rotacion_transaccional(
+    def registrar_rotacion(
+        self,
+        workspace_id: str,
+        nuevo_codigo_recuperacion: str,
+        nuevo_token: str,
+        nueva_version: int,
+        dias_validez_ws: int,
+        horas_validez_sesion: int,
+    ) -> None:
+        """
+        Primeramente verifica si ya existe una transaccion activa, en dicho caso simplemente ejecuta
+        el método directamente sin necesidad de abrir una nueva transacción, en caso contrario abre la
+        transacción y procede a ejecutar la rotación de credenciales mediante el método privado `__ejecutar_rotacion_transaccional`.
+        """
+        if self._conn.in_transaction:
+            self.__ejecutar_rotacion_transaccional(
+                workspace_id,
+                nuevo_codigo_recuperacion,
+                nuevo_token,
+                nueva_version,
+                dias_validez_ws,
+                horas_validez_sesion,
+            )
+            return
+
+        with self.transaccion():
+            self.__ejecutar_rotacion_transaccional(
+                workspace_id,
+                nuevo_codigo_recuperacion,
+                nuevo_token,
+                nueva_version,
+                dias_validez_ws,
+                horas_validez_sesion,
+            )
+
+    def __ejecutar_rotacion_transaccional(
         self,
         workspace_id: str,
         nuevo_codigo_recuperacion: str,
@@ -428,37 +479,32 @@ class RegistroOperativo:
         Ejecuta la rotación completa de credenciales en una operación atómica.
         Invalida el código anterior, revoca sesiones y guarda los nuevos accesos.
         """
+        # 1. Revocar TODAS las sesiones previas del espacio
+        self.revocar_sesiones_de_workspace(workspace_id)
 
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                # 1. Revocar TODAS las sesiones previas del espacio
-                self.revocar_sesiones_de_workspace(workspace_id)
+        # 2. Actualizar el código, renovar expiración e incrementar versión
+        cursor = self._conn.execute(
+            """
+            UPDATE workspaces 
+            SET codigo_hash = ?, 
+                expira_en = ?, 
+                version_manifiesto = ?
+            WHERE workspace_id = ? AND version_manifiesto = ? 
+            """,
+            (
+                _hash_de(nuevo_codigo_recuperacion),
+                _iso(_ahora() + timedelta(days=dias_validez_ws)),
+                nueva_version,
+                workspace_id,
+                nueva_version - 1,
+            ),
+        )
 
-                # 2. Actualizar el código, renovar expiración e incrementar versión
-                self._conn.execute(
-                    """
-                    UPDATE workspaces 
-                    SET codigo_hash = ?, 
-                        expira_en = ?, 
-                        version_manifiesto = ?
-                    WHERE workspace_id = ?
-                    """,
-                    (
-                        _hash_de(nuevo_codigo_recuperacion),
-                        _iso(_ahora() + timedelta(days=dias_validez_ws)),
-                        nueva_version,
-                        workspace_id,
-                    ),
-                )
+        if cursor.rowcount == 0:
+            raise ValueError("El espacio de trabajo fue modificado desde otra sesión o ya no está disponible")
 
-                # 3. Registrar el hash de la nueva sesión generada
-                self.crear_sesion(nuevo_token, workspace_id, horas_validez_sesion)
-
-                self._conn.execute("COMMIT")
-            except Exception:
-                self._conn.execute("ROLLBACK")
-                raise
+        # 3. Registrar el hash de la nueva sesión generada
+        self.crear_sesion(nuevo_token, workspace_id, horas_validez_sesion)
 
     # ------------------------------------------------------------------
     # Sesiones (§7.4)

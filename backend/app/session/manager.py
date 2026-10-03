@@ -16,22 +16,29 @@ class SessionManager:
 
     def crear_espacio(self) -> WorkspaceCreatedResponse:
         workspace_id = str(uuid.uuid4())
-
         # Generación del código de recuperación
         codigo_recuperacion = self.__generar_codigo_recuperacion()
 
-        # Se crea el workspace
-        self.db.crear_workspace(workspace_id, codigo_recuperacion, config.workspace_retention_days)
+        try:
+            with self.db.transaccion():
+                # Se crea el workspace dentro de la transacción
+                self.db.crear_workspace(workspace_id, codigo_recuperacion, config.workspace_retention_days)
 
-        # Generación del token de sesión para el workspace recién creado
-        token_sesion = self.__generar_token_sesion(workspace_id)
+                # Generación del token de sesión para el workspace recién creado
+                token_sesion = self.__generar_token_sesion(workspace_id)
 
-        # Persistencia en la Nube (OCI Object Storage)
-        self.__subir_manifest_oci(workspace_id, codigo_recuperacion)
+                # Persistencia en la Nube (OCI Object Storage)
+                self.__subir_manifest_oci(workspace_id, codigo_recuperacion)
 
-        return WorkspaceCreatedResponse(
-            workspace_id=workspace_id, recovery_code=codigo_recuperacion, token=token_sesion
-        )
+                return WorkspaceCreatedResponse(
+                    workspace_id=workspace_id, recovery_code=codigo_recuperacion, token=token_sesion
+                )
+
+        except Exception:
+            raise ErrorAplicacion(
+                code=ErrorCode.INTERNAL,
+                message="Hubo un error al crear el workspace, inténtelo nuevamente.",
+            )
 
     def recuperar_sesion(self, codigo_recuperacion: str) -> SessionResponse:
         workspace = self.db.resolver_workspace(codigo_recuperacion)
@@ -56,7 +63,7 @@ class SessionManager:
         # Obtener el workspace actual antes de rotar las credenciales
         workspace = self.db.obtener_workspace(workspace_id)
         if not workspace:
-            raise ValueError("Workspace no encontrado")
+            raise ValueError("Espacio de trabajo no encontrado")
 
         nueva_version = workspace.get("version_manifiesto", 1) + 1
 
@@ -64,18 +71,27 @@ class SessionManager:
         nuevo_codigo_recuperacion = self.__generar_codigo_recuperacion()
         nuevo_token = secrets.token_hex(32)
 
-        # 3. Transacción atómica: Escritura agrupada en SQLite
-        self.db.ejecutar_rotacion_transaccional(
-            workspace_id,
-            nuevo_codigo_recuperacion,
-            nuevo_token,
-            nueva_version,
-            config.workspace_retention_days,
-            config.session_max_hours,
-        )
+        try:
+            with self.db.transaccion():
+                # Transacción atómica: Escritura agrupada en SQLite
+                self.db.registrar_rotacion(
+                    workspace_id,
+                    nuevo_codigo_recuperacion,
+                    nuevo_token,
+                    nueva_version,
+                    config.workspace_retention_days,
+                    config.session_max_hours,
+                )
 
-        # Actualizar el manifiesto en la Nube (OCI Object Storage)
-        self.__subir_manifest_oci(workspace_id, nuevo_codigo_recuperacion, nueva_version)
+                # Actualizar el manifiesto en la Nube (OCI Object Storage)
+                # No se hace uso del if_match, ya que primero se aplica en la base de datos y ahi ya se tiene en cuenta
+                # la versión actual del workspace (UPDATE workspaces .... WHERE workspace_id = ? AND version_manifiesto = ? )
+                self.__subir_manifest_oci(workspace_id, nuevo_codigo_recuperacion, nueva_version)
+        except Exception as e:
+            raise ErrorAplicacion(
+                code=ErrorCode.INTERNAL,
+                message=f"Error al rotar las credenciales: {str(e)}",
+            )
 
         return nuevo_codigo_recuperacion, nuevo_token
 
@@ -94,9 +110,15 @@ class SessionManager:
         codigo_recuperacion = "-".join(raw_code[i : i + 4] for i in range(0, 32, 4))
         return codigo_recuperacion
 
-    def __subir_manifest_oci(self, workspace_id: str, codigo_recuperacion: str, version: int = 1) -> None:
+    def __subir_manifest_oci(
+        self,
+        workspace_id: str,
+        codigo_recuperacion: str,
+        version: int = 1,
+        if_match: str | None = None,
+    ) -> None:
         manifest = {"workspace_id": workspace_id, "codigo_hash": _hash_de(codigo_recuperacion), "version": version}
 
         ruta_oci = f"workspaces/{workspace_id}/manifest.json"
 
-        self.storage_provider.upload(ruta_oci, json.dumps(manifest).encode("utf-8"))
+        self.storage_provider.upload(ruta_oci, json.dumps(manifest).encode("utf-8"), if_match=if_match)
