@@ -374,17 +374,21 @@ class RegistroOperativo:
     # Workspaces
     # ------------------------------------------------------------------
 
-    def crear_workspace(self, workspace_id: str, codigo_recuperacion: str, dias_validez: int) -> None:
-        """Registra un espacio nuevo; del código se guarda SOLO el hash (§7.4)."""
+    def crear_workspace(self, workspace_id: str, codigo_recuperacion: str, dias_validez: int) -> tuple[str, str]:
+        """Registra un espacio nuevo; del código se guarda SOLO el hash (§7.4).
+        Devuelve el ID del workspace y la fecha de expiración.
+        """
         ahora = _ahora()
+        expira_en = _iso(ahora + timedelta(days=dias_validez))
         with self._lock:
             self._conn.execute(
                 """
                 INSERT INTO workspaces (workspace_id, codigo_hash, codigo_creado_en, expira_en)
                 VALUES (?, ?, ?, ?)
                 """,
-                (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), _iso(ahora + timedelta(days=dias_validez))),
+                (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), expira_en),
             )
+        return (workspace_id, expira_en)
 
     @_sincronizado
     def obtener_workspace(self, workspace_id: str) -> dict | None:
@@ -439,14 +443,15 @@ class RegistroOperativo:
         nueva_version: int,
         dias_validez_ws: int,
         horas_validez_sesion: int,
-    ) -> None:
+    ) -> tuple[str, str]:
         """
         Primeramente verifica si ya existe una transaccion activa, en dicho caso simplemente ejecuta
         el método directamente sin necesidad de abrir una nueva transacción, en caso contrario abre la
         transacción y procede a ejecutar la rotación de credenciales mediante el método privado `__ejecutar_rotacion_transaccional`.
+        Devuelve el ID del workspace y la nueva fecha de expiración.
         """
         if self._conn.in_transaction:
-            self.__ejecutar_rotacion_transaccional(
+            return self.__ejecutar_rotacion_transaccional(
                 workspace_id,
                 nuevo_codigo_recuperacion,
                 nuevo_token,
@@ -454,10 +459,9 @@ class RegistroOperativo:
                 dias_validez_ws,
                 horas_validez_sesion,
             )
-            return
 
         with self.transaccion():
-            self.__ejecutar_rotacion_transaccional(
+            return self.__ejecutar_rotacion_transaccional(
                 workspace_id,
                 nuevo_codigo_recuperacion,
                 nuevo_token,
@@ -474,13 +478,16 @@ class RegistroOperativo:
         nueva_version: int,
         dias_validez_ws: int,
         horas_validez_sesion: int,
-    ) -> None:
+    ) -> tuple[str, str]:
         """
         Ejecuta la rotación completa de credenciales en una operación atómica.
         Invalida el código anterior, revoca sesiones y guarda los nuevos accesos.
+        Devuelve el ID del workspace y la nueva fecha de expiración.
         """
         # 1. Revocar TODAS las sesiones previas del espacio
         self.revocar_sesiones_de_workspace(workspace_id)
+
+        expira_en = _iso(_ahora() + timedelta(days=dias_validez_ws))
 
         # 2. Actualizar el código, renovar expiración e incrementar versión
         cursor = self._conn.execute(
@@ -493,7 +500,7 @@ class RegistroOperativo:
             """,
             (
                 _hash_de(nuevo_codigo_recuperacion),
-                _iso(_ahora() + timedelta(days=dias_validez_ws)),
+                expira_en,
                 nueva_version,
                 workspace_id,
                 nueva_version - 1,
@@ -505,6 +512,31 @@ class RegistroOperativo:
 
         # 3. Registrar el hash de la nueva sesión generada
         self.crear_sesion(nuevo_token, workspace_id, horas_validez_sesion)
+
+        return (workspace_id, expira_en)
+
+    def renovar_expiracion_workspace(self, workspace_id: str, dias_validez: int, nueva_version: int) -> tuple[str, str]:
+        """
+        Renueva la fecha de expiración del workspace. Devuelve la fecha ISO exacta guardada en SQLite.
+        Devuelve el ID del workspace y la nueva fecha de expiración.
+        """
+        ahora = _ahora()
+        expira_en = _iso(ahora + timedelta(days=dias_validez))
+
+        cursor = self._conn.execute(
+            """
+                UPDATE workspaces
+                SET expira_en = ?, version_manifiesto = ?
+                WHERE workspace_id = ? AND borrado_en IS NULL AND expira_en > ?
+                AND version_manifiesto = ? 
+            """,
+            (expira_en, nueva_version, workspace_id, _iso(ahora), nueva_version - 1),
+        )
+
+        if cursor.rowcount == 0:
+            raise ValueError("El espacio de trabajo fue modificado desde otra sesión o ya no está disponible")
+
+        return workspace_id, expira_en
 
     # ------------------------------------------------------------------
     # Sesiones (§7.4)
