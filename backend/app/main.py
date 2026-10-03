@@ -37,6 +37,7 @@ import logging
 import re
 import uuid
 from contextvars import ContextVar
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -46,7 +47,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import workspaces
 from app.config import Configuracion, config
+from app.jobs.store import RegistroOperativo
 from app.schemas.errors import ErrorAplicacion, ErrorBody, ErrorCode, ErrorResponse
+from app.storage.oci_storage import get_storage_provider
 
 # ContextVar: una variable que vale "para la petición actual". Los módulos
 # de negocio podrán leer el request_id para logging sin pasarlo a mano por
@@ -247,6 +250,10 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         puede tirar el servicio por una dependencia externa lenta.
         """
         return {"status": "ok", "version": app.version}
+
+    app.state.config = ajustes
+    app.state.db = RegistroOperativo(ruta_db=Path(ajustes.data_dir) / "operativo.db")
+    app.state.storage_provider = get_storage_provider(configuracion=ajustes)
 
     app.include_router(workspaces.router)
 

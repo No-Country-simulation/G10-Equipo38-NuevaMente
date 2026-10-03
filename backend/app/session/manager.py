@@ -2,7 +2,6 @@ import json
 import secrets
 import uuid
 
-from app.config import config
 from app.jobs.store import RegistroOperativo, _hash_de
 from app.schemas.errors import ErrorAplicacion, ErrorCode
 from app.schemas.responses import SessionResponse, WorkspaceCreatedResponse
@@ -10,9 +9,17 @@ from app.storage.provider import StorageProvider
 
 
 class SessionManager:
-    def __init__(self, db: RegistroOperativo, storage_provider: StorageProvider) -> None:
+    def __init__(
+        self,
+        db: RegistroOperativo,
+        storage_provider: StorageProvider,
+        workspace_retention_days: int,
+        session_max_hours: int,
+    ) -> None:
         self.db = db
         self.storage_provider = storage_provider
+        self.workspace_retention_days = workspace_retention_days
+        self.session_max_hours = session_max_hours
 
     def crear_espacio(self) -> WorkspaceCreatedResponse:
         workspace_id = str(uuid.uuid4())
@@ -22,7 +29,7 @@ class SessionManager:
         try:
             with self.db.transaccion():
                 # Se crea el workspace dentro de la transacción
-                self.db.crear_workspace(workspace_id, codigo_recuperacion, config.workspace_retention_days)
+                self.db.crear_workspace(workspace_id, codigo_recuperacion, self.workspace_retention_days)
 
                 # Generación del token de sesión para el workspace recién creado
                 token_sesion = self.__generar_token_sesion(workspace_id)
@@ -79,8 +86,8 @@ class SessionManager:
                     nuevo_codigo_recuperacion,
                     nuevo_token,
                     nueva_version,
-                    config.workspace_retention_days,
-                    config.session_max_hours,
+                    self.workspace_retention_days,
+                    self.session_max_hours,
                 )
 
                 # Actualizar el manifiesto en la Nube (OCI Object Storage)
@@ -101,7 +108,7 @@ class SessionManager:
     def __generar_token_sesion(self, workspace_id: str) -> str:
         # Token de sesión opaco (32 bytes = 256 bits)
         token_sesion = secrets.token_hex(32)
-        self.db.crear_sesion(token_sesion, workspace_id, config.session_max_hours)
+        self.db.crear_sesion(token_sesion, workspace_id, self.session_max_hours)
         return token_sesion
 
     def __generar_codigo_recuperacion(self) -> str:
