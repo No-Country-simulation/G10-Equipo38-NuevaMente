@@ -53,6 +53,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -62,7 +63,7 @@ from app.schemas.enums import DocumentStatus, JobStatus
 # Versión actual del esquema. Cada cambio de esquema agrega una entrada a
 # MIGRACIONES y sube este número; NUNCA se edita una migración ya aplicada
 # (las bases reales de los usuarios quedaron con la vieja).
-VERSION_ESQUEMA = 3
+VERSION_ESQUEMA = 4
 
 # Cada migración: (versión, SQL). Se aplican en orden ascendente dentro de
 # una transacción cada una. La v1 crea todas las tablas del issue #08.
@@ -198,6 +199,13 @@ MIGRACIONES: list[tuple[int, str]] = [
         CREATE UNIQUE INDEX idx_jobs_generation ON jobs(generation_id);
         CREATE INDEX idx_events_job ON events(job_id, id);
     """,
+    ),
+    (
+        4,
+        """
+        -- Índice para optimizar búsquedas por hash de recuperación en resolver_workspace (§7.4, Issue 09)
+        CREATE INDEX idx_workspaces_codigo_hash ON workspaces(codigo_hash);
+        """,
     ),
 ]
 
@@ -354,21 +362,40 @@ class RegistroOperativo:
             )
             return cursor.rowcount
 
+    @contextmanager
+    def transaccion(self):
+        """
+        Context manager para agrupar operaciones atómicas en SQLite.
+        Mantiene el lock de escrituras y maneja BEGIN/COMMIT/ROLLBACK.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
     # ------------------------------------------------------------------
     # Workspaces
     # ------------------------------------------------------------------
 
-    def crear_workspace(self, workspace_id: str, codigo_recuperacion: str, dias_validez: int) -> None:
-        """Registra un espacio nuevo; del código se guarda SOLO el hash (§7.4)."""
+    def crear_workspace(self, workspace_id: str, codigo_recuperacion: str, dias_validez: int) -> tuple[str, str]:
+        """Registra un espacio nuevo; del código se guarda SOLO el hash (§7.4).
+        Devuelve el ID del workspace y la fecha de expiración.
+        """
         ahora = _ahora()
+        expira_en = _iso(ahora + timedelta(days=dias_validez))
         with self._lock:
             self._conn.execute(
                 """
                 INSERT INTO workspaces (workspace_id, codigo_hash, codigo_creado_en, expira_en)
                 VALUES (?, ?, ?, ?)
                 """,
-                (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), _iso(ahora + timedelta(days=dias_validez))),
+                (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), expira_en),
             )
+        return (workspace_id, expira_en)
 
     @_sincronizado
     def obtener_workspace(self, workspace_id: str) -> dict | None:
@@ -415,7 +442,7 @@ class RegistroOperativo:
                 self._conn.execute("ROLLBACK")
                 raise
 
-    def ejecutar_rotacion_transaccional(
+    def registrar_rotacion(
         self,
         workspace_id: str,
         nuevo_codigo_recuperacion: str,
@@ -423,42 +450,100 @@ class RegistroOperativo:
         nueva_version: int,
         dias_validez_ws: int,
         horas_validez_sesion: int,
-    ) -> None:
+    ) -> tuple[str, str]:
+        """
+        Primeramente verifica si ya existe una transaccion activa, en dicho caso simplemente ejecuta
+        el método directamente sin necesidad de abrir una nueva transacción, en caso contrario abre la
+        transacción y procede a ejecutar la rotación de credenciales mediante el método privado `__ejecutar_rotacion_transaccional`.
+        Devuelve el ID del workspace y la nueva fecha de expiración.
+        """
+        if self._conn.in_transaction:
+            return self.__ejecutar_rotacion_transaccional(
+                workspace_id,
+                nuevo_codigo_recuperacion,
+                nuevo_token,
+                nueva_version,
+                dias_validez_ws,
+                horas_validez_sesion,
+            )
+
+        with self.transaccion():
+            return self.__ejecutar_rotacion_transaccional(
+                workspace_id,
+                nuevo_codigo_recuperacion,
+                nuevo_token,
+                nueva_version,
+                dias_validez_ws,
+                horas_validez_sesion,
+            )
+
+    def __ejecutar_rotacion_transaccional(
+        self,
+        workspace_id: str,
+        nuevo_codigo_recuperacion: str,
+        nuevo_token: str,
+        nueva_version: int,
+        dias_validez_ws: int,
+        horas_validez_sesion: int,
+    ) -> tuple[str, str]:
         """
         Ejecuta la rotación completa de credenciales en una operación atómica.
         Invalida el código anterior, revoca sesiones y guarda los nuevos accesos.
+        Devuelve el ID del workspace y la nueva fecha de expiración.
         """
+        # 1. Revocar TODAS las sesiones previas del espacio
+        self.revocar_sesiones_de_workspace(workspace_id)
 
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                # 1. Revocar TODAS las sesiones previas del espacio
-                self.revocar_sesiones_de_workspace(workspace_id)
+        expira_en = _iso(_ahora() + timedelta(days=dias_validez_ws))
 
-                # 2. Actualizar el código, renovar expiración e incrementar versión
-                self._conn.execute(
-                    """
-                    UPDATE workspaces 
-                    SET codigo_hash = ?, 
-                        expira_en = ?, 
-                        version_manifiesto = ?
-                    WHERE workspace_id = ?
-                    """,
-                    (
-                        _hash_de(nuevo_codigo_recuperacion),
-                        _iso(_ahora() + timedelta(days=dias_validez_ws)),
-                        nueva_version,
-                        workspace_id,
-                    ),
-                )
+        # 2. Actualizar el código, renovar expiración e incrementar versión
+        cursor = self._conn.execute(
+            """
+            UPDATE workspaces 
+            SET codigo_hash = ?, 
+                expira_en = ?, 
+                version_manifiesto = ?
+            WHERE workspace_id = ? AND version_manifiesto = ? 
+            """,
+            (
+                _hash_de(nuevo_codigo_recuperacion),
+                expira_en,
+                nueva_version,
+                workspace_id,
+                nueva_version - 1,
+            ),
+        )
 
-                # 3. Registrar el hash de la nueva sesión generada
-                self.crear_sesion(nuevo_token, workspace_id, horas_validez_sesion)
+        if cursor.rowcount == 0:
+            raise ValueError("El espacio de trabajo fue modificado desde otra sesión o ya no está disponible")
 
-                self._conn.execute("COMMIT")
-            except Exception:
-                self._conn.execute("ROLLBACK")
-                raise
+        # 3. Registrar el hash de la nueva sesión generada
+        self.crear_sesion(nuevo_token, workspace_id, horas_validez_sesion)
+
+        return (workspace_id, expira_en)
+
+    def renovar_expiracion_workspace(self, workspace_id: str, dias_validez: int, nueva_version: int) -> tuple[str, str]:
+        """
+        Renueva la fecha de expiración del workspace. Devuelve la fecha ISO exacta guardada en SQLite.
+        Devuelve el ID del workspace y la nueva fecha de expiración.
+        """
+        ahora = _ahora()
+        expira_en = _iso(ahora + timedelta(days=dias_validez))
+
+        cursor = self._conn.execute(
+            """
+                UPDATE workspaces
+                SET expira_en = ?, version_manifiesto = ?
+                WHERE workspace_id = ? AND borrado_en IS NULL AND expira_en > ?
+                AND version_manifiesto = ? 
+            """,
+            (expira_en, nueva_version, workspace_id, _iso(ahora), nueva_version - 1),
+        )
+
+        if cursor.rowcount == 0:
+            raise ValueError("El espacio de trabajo fue modificado desde otra sesión o ya no está disponible")
+
+        return workspace_id, expira_en
 
     # ------------------------------------------------------------------
     # Sesiones (§7.4)

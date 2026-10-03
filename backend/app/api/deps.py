@@ -1,23 +1,22 @@
-from pathlib import Path
-
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.config import config
-from app.jobs.store import RegistroOperativo
 from app.schemas.errors import ErrorAplicacion, ErrorCode
 from app.session.manager import SessionManager
-from app.storage.oci_storage import get_storage_provider
 
 security = HTTPBearer()
 
-storage_provider = get_storage_provider()
-archivo_db = Path(config.data_dir) / "operativo.db"
-db_operativa = RegistroOperativo(ruta_db=archivo_db)
 
+def get_session_manager(request: Request) -> SessionManager:
 
-def get_session_manager() -> SessionManager:
-    return SessionManager(db=db_operativa, storage_provider=storage_provider)
+    config = request.app.state.config
+
+    return SessionManager(
+        db=request.app.state.db,
+        storage_provider=request.app.state.storage_provider,
+        workspace_retention_days=config.workspace_retention_days,
+        session_max_hours=config.session_max_hours,
+    )
 
 
 def get_sesion_actual(

@@ -1,8 +1,11 @@
+import threading
 from datetime import datetime, timedelta
 
 from fastapi import Request
 
 from app.schemas.errors import ErrorAplicacion, ErrorCode
+
+_lock = threading.RLock()
 
 # Diccionarios generalizados
 # Estructura: { "accion": [timestamps] }
@@ -37,26 +40,34 @@ class RateLimiter:
         ip_cliente = _obtener_ip(request)
         clave_ip = f"{self.key}:{ip_cliente}"
 
-        # Validación Global
-        _peticiones_globales.setdefault(self.key, [])
-        if _contar_eventos_recientes(_peticiones_globales[self.key]) >= self.limite_global:
-            raise ErrorAplicacion(
-                code=ErrorCode.RATE_LIMITED,
-                message="Se ha alcanzado el límite global de solicitudes permitido. Por favor, inténtalo nuevamente más tarde.",
-            )
+        with _lock:
+            # Prevención de Out Of Memory (OOM)
+            if len(_peticiones_ip) > 10000:
+                _peticiones_ip.clear()
 
-        # Validación por IP
-        _peticiones_ip.setdefault(clave_ip, [])
-        if _contar_eventos_recientes(_peticiones_ip[clave_ip]) >= self.limite_ip:
-            raise ErrorAplicacion(
-                code=ErrorCode.RATE_LIMITED,
-                message="Se ha alcanzado el límite de solicitudes permitidas. Por favor, inténtalo nuevamente más tarde.",
-            )
+            if len(_peticiones_globales) > 10000:
+                _peticiones_globales.clear()
 
-        # Registrar la petición
-        ahora = datetime.now()
-        _peticiones_globales[self.key].append(ahora)
-        _peticiones_ip[clave_ip].append(ahora)
+            # Validación Global
+            _peticiones_globales.setdefault(self.key, [])
+            if _contar_eventos_recientes(_peticiones_globales[self.key]) >= self.limite_global:
+                raise ErrorAplicacion(
+                    code=ErrorCode.RATE_LIMITED,
+                    message="Se ha alcanzado el límite global de solicitudes permitido. Por favor, inténtalo nuevamente más tarde.",
+                )
+
+            # Validación por IP
+            _peticiones_ip.setdefault(clave_ip, [])
+            if _contar_eventos_recientes(_peticiones_ip[clave_ip]) >= self.limite_ip:
+                raise ErrorAplicacion(
+                    code=ErrorCode.RATE_LIMITED,
+                    message="Se ha alcanzado el límite de solicitudes permitidas. Por favor, inténtalo nuevamente más tarde.",
+                )
+
+            # Registrar la petición
+            ahora = datetime.now()
+            _peticiones_globales[self.key].append(ahora)
+            _peticiones_ip[clave_ip].append(ahora)
 
         return ip_cliente
 
@@ -65,16 +76,28 @@ class RateLimiter:
 def validar_intentos_fallidos(request: Request) -> str:
     """Bloquea estrictamente si hay 5 fallos de intento de acceso."""
     ip_cliente = _obtener_ip(request)
-    _intentos_fallidos_ip.setdefault(ip_cliente, [])
+    with _lock:
+        # Prevención de Out Of Memory (OOM)
+        if len(_intentos_fallidos_ip) > 10000:
+            _intentos_fallidos_ip.clear()
 
-    if _contar_eventos_recientes(_intentos_fallidos_ip[ip_cliente]) >= 5:
-        raise ErrorAplicacion(
-            code=ErrorCode.RECOVERY_LOCKED,
-            message="Se ha alcanzado el límite de intentos fallidos, bloqueo temporal de 1 minuto aplicado.",
-        )
+        _intentos_fallidos_ip.setdefault(ip_cliente, [])
+
+        if _contar_eventos_recientes(_intentos_fallidos_ip[ip_cliente]) >= 5:
+            raise ErrorAplicacion(
+                code=ErrorCode.RECOVERY_LOCKED,
+                message="Se ha alcanzado el límite de intentos fallidos, bloqueo temporal de 1 minuto aplicado.",
+            )
 
     return ip_cliente
 
 
 def registrar_intento_fallido(ip: str) -> None:
-    _intentos_fallidos_ip.setdefault(ip, []).append(datetime.now())
+    with _lock:
+        _intentos_fallidos_ip.setdefault(ip, []).append(datetime.now())
+
+
+def limpiar_intentos_fallidos(ip: str) -> None:
+    """Limpia los intentos fallidos de una IP tras un canje exitoso."""
+    with _lock:
+        _intentos_fallidos_ip.pop(ip, None)
