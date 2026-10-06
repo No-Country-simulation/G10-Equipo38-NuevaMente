@@ -70,6 +70,7 @@ from typing import Any, Callable
 
 from app.jobs.store import RegistroOperativo
 from app.schemas.enums import JobStatus
+from app.schemas.internal import PresupuestoLlamadas
 
 _GESTORES_ACTIVOS: dict[str, object] = {}
 _GUARDIA_GESTORES = threading.Lock()
@@ -131,6 +132,10 @@ class ReintentableError(Exception):
 
 class CuotaAgotadaError(RuntimeError):
     """Se agotó una ventana de cuota del proveedor (RPM/TPM/RPD, §7.5)."""
+
+
+class PresupuestoAgotadoError(RuntimeError):
+    """El grafo consumió su presupuesto; no es una cuota del proveedor."""
 
 
 class DeadlineExcedidoError(Exception):
@@ -259,7 +264,14 @@ class ContextoEjecucion:
         if time.monotonic() > self.deadline:
             raise DeadlineExcedidoError()
 
-    def llamar(self, funcion: Callable[..., Any], *, modelo: str, tokens_estimados: int = 0) -> Any:
+    def llamar(
+        self,
+        funcion: Callable[..., Any],
+        *,
+        modelo: str,
+        tokens_estimados: int = 0,
+        presupuesto: PresupuestoLlamadas | None = None,
+    ) -> Any:
         """Reserva cuota; el adaptador debe aplicar timeout al SDK/HTTP.
 
         La llamada conserva la ranura hasta retornar aunque se cancele.
@@ -269,9 +281,13 @@ class ContextoEjecucion:
             raise TypeError("ctx.llamar requiere un adaptador síncrono")
         for intento in range(self.reintentos_transitorios + 1):
             self.chequear()
+            if presupuesto is not None and presupuesto.disponibles == 0:
+                raise PresupuestoAgotadoError("El grafo agotó su presupuesto de solicitudes")
             if self.cuotas is None:
                 raise CuotaAgotadaError("No hay cuotas configuradas")
             self.cuotas.permitir(modelo, tokens_estimados)
+            if presupuesto is not None:
+                presupuesto.usadas += 1
             timeout = min(self.timeout_por_llamada, self.deadline - time.monotonic())
             inicio = time.monotonic()
             try:

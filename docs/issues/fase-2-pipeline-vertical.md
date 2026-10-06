@@ -228,10 +228,10 @@ consumo de estas plantillas corresponden a los issues 23/28/29.
 - Llamada Gemini síncrona mediante `ctx.llamar`, con timeout y errores compatibles. Agregar al doble una entrada síncrona de generación sin retirar `generar` async. Los reintentos técnicos son del gestor; correcciones de esquema/citas consumen las redacciones del grafo.
 
 **Criterios de aceptación**:
-- [ ] Con el doble de Gemini, produce un `FlashcardDeck` válido con citas a chunk_ids presentes en la evidencia.
-- [ ] Una cita inventada por el doble se detecta y corrige antes de salir del nodo.
-- [ ] Genera los 5 formatos contra schemas de `Issue 03` (test parametrizado).
-- [ ] Respuesta LLM malformada no se convierte en borrador: reintento o fallo técnico explícito.
+- [x] Con el doble de Gemini, produce un `FlashcardDeck` válido con citas a chunk_ids presentes en la evidencia.
+- [x] Una cita inventada por el doble se detecta y corrige antes de salir del nodo.
+- [x] Genera los 5 formatos contra schemas de `Issue 03` (test parametrizado).
+- [x] Respuesta LLM malformada no se convierte en borrador: reintento o fallo técnico explícito.
 
 **Verificación**: `pytest backend/tests/test_writer.py` parametrizado por formato.
 

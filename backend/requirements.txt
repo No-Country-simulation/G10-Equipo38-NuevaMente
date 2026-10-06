@@ -23,3 +23,5 @@ pydantic-settings==2.15.0
 pypdf==6.19.0
 # BPE local de referencia para chunking; vocabulario versionado con el código.
 tiktoken==0.12.0
+# SDK oficial para generación estructurada; misma versión fijada por el carril RAG.
+google-genai==2.28.0

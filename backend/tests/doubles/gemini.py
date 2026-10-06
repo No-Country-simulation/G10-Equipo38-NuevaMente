@@ -42,10 +42,12 @@ from collections import deque
 class DobleGemini:
     """Falso cliente Gemini con respuestas programables y embeddings estables."""
 
+    es_mock = True
+
     def __init__(self, dimension_embeddings: int = 768) -> None:
         # 768 es EMBEDDING_DIMENSIONS del Apéndice A.
         self.dimension_embeddings = dimension_embeddings
-        self._generaciones: deque[str] = deque()
+        self._generaciones: deque[str | Exception] = deque()
         self._veredictos: deque[dict] = deque()
         # Contadores de uso: permiten que un test afirme CUÁNTAS llamadas
         # consumió (el presupuesto de §7.5 se prueba contando, no adivinando).
@@ -55,7 +57,7 @@ class DobleGemini:
 
     # ------------------------- programación -------------------------
 
-    def programar_generacion(self, *respuestas: str) -> None:
+    def programar_generacion(self, *respuestas: str | Exception) -> None:
         """Encola las próximas respuestas de `generar`, en orden.
 
         Si un test no programa nada, `generar` devuelve una respuesta
@@ -79,10 +81,28 @@ class DobleGemini:
     # ------------------------- "API" del doble -------------------------
 
     async def generar(self, prompt: str, *, modelo: str | None = None) -> str:
-        """Devuelve la próxima respuesta programada (async: la API real lo es)."""
+        """Interfaz async existente; comparte respuestas y contadores con sync."""
+        return self._generar()
+
+    def generar_sync(
+        self,
+        prompt: str,
+        *,
+        modelo: str | None = None,
+        system_instruction: str = "",
+        response_json_schema: dict | None = None,
+        timeout: float = 60.0,
+        max_output_tokens: int = 8192,
+    ) -> str:
+        return self._generar()
+
+    def _generar(self) -> str:
         self.llamadas_generacion += 1
         if self._generaciones:
-            return self._generaciones.popleft()
+            respuesta = self._generaciones.popleft()
+            if isinstance(respuesta, Exception):
+                raise respuesta
+            return respuesta
         return "[doble-gemini: respuesta no programada por el test]"
 
     async def verificar_afirmacion(self, afirmacion: str, evidencia: str) -> dict:
