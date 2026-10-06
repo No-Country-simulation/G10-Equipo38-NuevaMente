@@ -147,6 +147,12 @@ Listado paginado con filtros: `documento`, `perfil`, `formato`, `idioma`, `desde
 - Cada solicitud real a Gemini pasa por `ctx.llamar(funcion, modelo=..., tokens_estimados=...)`; `funcion` recibe `timeout` en segundos y devuelve el resultado resuelto, nunca una corutina. El adaptador convierte el timeout a las unidades del SDK y traduce fallos transitorios a `ReintentableError`, conservando `Retry-After` cuando exista. Una cuota diaria agotada se propaga sin reintentar.
 - El gestor es el único dueño de los reintentos de Gemini: hasta dos adicionales, tres intentos técnicos en total. Desactivar reintentos automáticos del SDK y evitar bucles adicionales del wrapper. Cada intento reserva cuota y consume el presupuesto que corresponda. Las tres redacciones pedagógicas son otro límite; no se repite el pipeline por un fallo técnico.
 - Los presupuestos RPM/TPM/RPD se comparten por modelo; el límite de 20 solicitudes de generación/redacción/revisión no convierte 100 embeddings en 20. El grafo aplica su presupuesto además de las cuotas del modelo, incluidos reintentos y verificaciones visuales de la generación.
+- Writer pasa también `presupuesto=PresupuestoLlamadas` a `ctx.llamar`; los nodos
+  de revisión deberán reutilizarlo:
+  verifica disponibilidad antes de reservar cuota e incrementa `usadas` por solicitud
+  admitida, incluidos retries. Una cuota denegada no consume este contador.
+  La firma sigue siendo compatible para consumidores que omiten este presupuesto;
+  embeddings de Issue 13 no usa el presupuesto de redacción/revisión.
 - `DobleGemini` conserva `embed`, `generar` y `verificar_afirmacion` asíncronos. Agregar `embed_sync` en Issue 13 y las entradas síncronas de generación/verificación al implementar sus consumidores; reutilizar la misma lógica, respuestas y contadores. Los dobles se habilitan explícitamente solo en desarrollo/CI.
 - OCI mantiene la política propia de Issue 14: escrituras idempotentes, hasta tres intentos totales y contabilización de solicitudes de storage. No usa cuotas Gemini ni añade otro bucle a `ctx.llamar`.
 - Los endpoints comunes `GET /api/jobs/{id}`, `GET /api/jobs/{id}/events` y `POST /api/jobs/{id}/cancel` pertenecen a **Issue 20**. Issue 19 los consume, sin volver a implementarlos. El gestor se inicia y detiene en el lifespan de la API; al detenerse se espera su worker antes de cerrar SQLite.
@@ -421,6 +427,39 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
   de injection, pero no sustituyen autorización, validación ni evaluación.
   Evidencia automatizada: `backend/tests/test_prompts.py`; los ejemplos requieren
   revisión de pares al revisar el PR.
+
+### Writer (Issue 23)
+
+- `writer(EstadoGrafo, DependenciasWriter)` entrega un update con borrador Pydantic
+  y referencias canónicas para Critic. Requiere parámetros/restricciones del Supervisor,
+  evidencia autorizada, cobertura recuperada y trazabilidad de ingesta/recuperación.
+  No aprueba ni persiste contenido ni marca `completed`.
+- Revalida el documento antes de llamar y antes de devolver el borrador. Rechaza
+  evidencia ajena/antigua, cambios de fuente, citas inventadas y ubicaciones falsas.
+  Completa ubicaciones omitidas desde el chunk autorizado, sin agregar hechos nuevos.
+  Metadatos deben coincidir con perfil, formato, nicho, detalle, idiomas y alcance;
+  no se puede inventar cobertura. Critic revisará su respaldo factual y pedagógico.
+- Parseo JSON estricto, sin cercas Markdown, claves duplicadas ni valores no finitos.
+  Una corrección de estructura/citas consume otra redacción del contador global, hasta
+  tres contando las revisiones previas de Critic. Al agotarlas sin borrador válido:
+  `failed/VALIDATION_ERROR`. Una nueva invocación tras tres redacciones válidas pero
+  no aprobadas termina `rejected_quality`, sin conservar el borrador anterior.
+- `ClienteGeminiGeneracion` usa `google-genai==2.28.0`, cliente síncrono, JSON Schema
+  del formato y llamadas mediante `ctx.llamar`. Desactiva retries del SDK (un intento)
+  y llamadas automáticas a funciones. Convierte timeout a ms; respeta Retry-After,
+  distingue cuota diaria de 429 transitorio y falla sin fallback ni payloads sensibles.
+  Respuestas bloqueadas, vacías o truncadas no se aceptan como borradores.
+- `GENERATION_MAX_OUTPUT_TOKENS=8192` es configurable. La reserva TPM estima entrada
+  con el BPE offline e incluye el máximo de salida. Modelo de generación: configuración
+  vigente, sin cambio automático. Se conserva `prompt_version` de la biblioteca y se
+  registra el modelo realmente solicitado en la trazabilidad.
+- `DependenciasWriter` mantiene configuración/proveedor/contexto fuera del estado y
+  exige coherencia con `MOCK_GEMINI`; producción sigue rechazando mocks.
+  `DobleGemini.generar_sync` comparte cola y contadores con `generar` async.
+- Errores, cancelación o deadline eliminan borrador/referencias y evaluaciones previas
+  del update. La integración de estados terminales con el registro, las aristas y los
+  consumidores finales pertenece a Issue 29. Pruebas: `backend/tests/test_writer.py`,
+  con doble y transporte HTTP simulado del SDK; no acreditan Gemini/OCI reales.
 
 ### Integración interna del registro y el ejecutor
 
