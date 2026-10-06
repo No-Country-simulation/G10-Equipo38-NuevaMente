@@ -394,6 +394,34 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
   conserva el mapeo genérico; no usar su `detail` para transportar códigos de dominio.
 - Esta precisión de esquemas públicos debe revisarse como `contract-change` en el PR.
 
+### Biblioteca de prompts (Issue 22)
+
+- `core/agents/prompts.py` compone Writer/Critic para los cuatro perfiles, cinco
+  formatos, cuatro nichos y tres idiomas desde matrices comunes; el detalle es
+  independiente del perfil. `cargar_plantilla(GenerateRequest)` entrega los dos
+  roles y `prompt_version=nm-prompts-1.0.0`, sin usar proveedores.
+- `preparar_prompts(..., workspace_id, source_hash, idioma_origen, evidencia)`
+  separa `system_instruction` de `datos_json`. Documento, consultas, feedback y
+  borrador nunca se interpolan en el sistema. Rechaza evidencia vacía, ajena,
+  de otra versión y colisiones de chunk_id; deduplica el mismo fragmento.
+  Espacio/hash provienen del contexto y registro autorizados, no del cliente.
+- Los ejemplos few-shot contienen marcadores de contenido y frases de tono,
+  sin hechos técnicos externos. IDs, citas, metadata y duraciones del ejemplo
+  son ilustrativos: no se copian al resultado. El schema de Writer se obtiene
+  de los modelos vigentes; produce contenido y metadatos antes de Critic.
+- Idioma de salida: es latinoamericano, inglés técnico o pt-BR. Se conservan
+  citas originales e identificadores técnicos; las traducciones se etiquetan.
+  Critic revisa metadatos, distractores, cobertura y todos los bloqueos de §19.
+  Usa el resultado factual del backend, sin inventar score o conteos.
+- `PromptsGeneracion.registrar_trazabilidad(Trazabilidad)` devuelve una copia
+  con la versión utilizada, que los consumidores conservan en el paquete
+  canónico. No almacena prompts completos ni cambia el contrato HTTP v1.
+- Issues 23/28/29 conectarán estas plantillas con Writer/Critic y `ctx.llamar`;
+  el juez visual recibirá la imagen original. Las instrucciones reducen riesgo
+  de injection, pero no sustituyen autorización, validación ni evaluación.
+  Evidencia automatizada: `backend/tests/test_prompts.py`; los ejemplos requieren
+  revisión de pares al revisar el PR.
+
 ### Integración interna del registro y el ejecutor
 
 - SQLite migra automáticamente a v3: `jobs.generation_id` es opcional, único y

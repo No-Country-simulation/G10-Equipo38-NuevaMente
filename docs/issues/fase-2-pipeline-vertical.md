@@ -198,11 +198,16 @@ graph TD
 - Reglas específicas de quiz: una única respuesta defendible, distractores plausibles marcados como deliberadamente falsos (§19.2).
 
 **Criterios de aceptación**:
-- [ ] Existe plantilla cargable para las 80 combinaciones (perfil×formato×nicho) en los 3 idiomas, generadas desde matrices base (sin duplicar 240 archivos).
+- [x] Existe plantilla cargable para las 80 combinaciones (perfil×formato×nicho) en los 3 idiomas, generadas desde matrices base (sin duplicar 240 archivos).
 - [ ] Ningún ejemplo few-shot introduce hechos que el documento no contiene (revisión de pares).
-- [ ] `prompt_version` queda registrado en la trazabilidad del paquete.
+- [x] `prompt_version` queda registrado en la trazabilidad del paquete.
 
 **Verificación**: test de cobertura de combinaciones + revisión de pares del contenido de prompts.
+
+Implementación en `core/agents/prompts.py`, con cobertura en `backend/tests/test_prompts.py`.
+Los ejemplos usan marcadores y tono, sin hechos técnicos externos; la revisión de pares
+del contenido debe completarse durante la revisión del PR. Las llamadas reales y el
+consumo de estas plantillas corresponden a los issues 23/28/29.
 
 ---
 
