@@ -23,5 +23,6 @@ pydantic-settings==2.15.0
 pypdf==6.19.0
 # BPE local de referencia para chunking; vocabulario versionado con el código.
 tiktoken==0.12.0
-# SDK oficial para generación estructurada; misma versión fijada por el carril RAG.
+# google-genai: SDK oficial de Gemini. Lo usan la generación estructurada y el cliente
+# de embeddings (app/core/rag/embeddings.py, gemini-embedding-2 a 768 dimensiones).
 google-genai==2.28.0
