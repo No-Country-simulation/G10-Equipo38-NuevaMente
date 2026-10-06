@@ -421,3 +421,32 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
   (caracteres, fin exclusivo). Las exclusiones textuales ambiguas producen
   `no_evaluable`; el caller debe suministrar posiciones exactas para evitar alterar
   explicaciones que comparten palabras con un distractor.
+
+### Estado y Supervisor del grafo (Issue 21, contrato interno 1.0)
+
+- `core/agents/graph_state.py` define `EstadoGrafo`, modelo Pydantic compatible
+  con el esquema de estado de LangGraph. Reutiliza `GenerateRequest`, evidencia
+  y referencias tipadas, formatos pedagógicos, metadatos y evaluaciones existentes.
+  Incluye IDs, hash de fuente, idiomas, alcance solicitado en `parametros.alcance`,
+  cobertura, borrador, feedback, intento, presupuesto, deadline, estado, diagnóstico
+  y referencias de persistencia. No cambia el contrato HTTP v1.
+- `DependenciasGrafo` es contexto de runtime: contiene `ContextoEjecucion` y
+  el lector de metadata documental autorizado. No pertenece a `EstadoGrafo` ni
+  a un checkpoint; tokens, clientes SDK y locks tampoco son campos admitidos.
+- `crear_estado_inicial(solicitud, generation_id=..., dependencias=...)` valida
+  la entrada y aplica `supervisor(estado, dependencias)`. El nodo devuelve un
+  update sin mutar el estado ni generar contenido. La consulta documental usa
+  siempre el espacio del contexto de ejecución, con revalidación de cancelación.
+- Parámetros/secciones/idiomas inválidos y documentos no `ready` dejan `failed`
+  con diagnóstico. Inexistente y ajeno comparten `NOT_FOUND`; visión pendiente
+  bloquea aunque la metadata diga `ready`. Cancelación y deadline siguen al worker.
+  El idioma de origen normaliza variantes regionales y nunca pisa `idioma_salida`.
+- Restricciones y rúbrica fijan formato, orientación del perfil, idiomas, citas,
+  ejemplos etiquetados, tres redacciones y hasta veinte solicitudes. Score ≥0.85
+  solo es un mínimo: todos los bloqueos y dimensiones deben superar la revisión.
+- Issue 29 integrará estos updates con `runtime.context`, las aristas terminales
+  y el registro operativo. Debe terminar ante `failed/cancelled`, sincronizar el
+  contador con solicitudes reales/reintentos mediante `ctx.llamar` y persistir
+  únicamente contenido aprobado. El contador serializado no aplica cuotas.
+  `deadline` es monotónico del proceso; tras reinicio el trabajo se interrumpe.
+- Evidencia: `backend/tests/test_supervisor.py` y snapshot JSON versionado.
