@@ -176,9 +176,9 @@ graph TD
 - Propagar el contexto de ejecución como dependencia de runtime del grafo, sin serializar tokens, clientes SDK, locks ni el propio contexto en el estado pedagógico. Los contadores del estado reflejan solicitudes reales, no sustituyen las cuotas centrales.
 
 **Criterios de aceptación**:
-- [ ] El Supervisor con parámetros inválidos (formato inexistente, documento no `ready`) termina el trabajo `failed` con diagnóstico, sin gastar llamadas LLM.
-- [ ] El estado contiene la rúbrica y restricciones que Writer/Critic consumirán (contrato interno versionado).
-- [ ] 100% determinista: misma entrada → mismo estado inicial (test snapshot).
+- [x] El Supervisor con parámetros inválidos (formato inexistente, documento no `ready`) termina el trabajo `failed` con diagnóstico, sin gastar llamadas LLM.
+- [x] El estado contiene la rúbrica y restricciones que Writer/Critic consumirán (contrato interno versionado).
+- [x] 100% determinista: misma entrada → mismo estado inicial (test snapshot).
 
 **Verificación**: `pytest backend/tests/test_supervisor.py`.
 
