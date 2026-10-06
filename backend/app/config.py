@@ -84,6 +84,7 @@ class Configuracion(BaseSettings):
     gemini_verification_model: str = "gemini-2.5-flash"
     gemini_embedding_model: str = "gemini-embedding-2"
     embedding_dimensions: int = Field(default=768, gt=0)
+    generation_max_output_tokens: int = Field(default=8192, gt=0)
 
     # ------------------------------------------------------------------
     # OCI Object Storage (proveedor real; el issue #14 lo consume).

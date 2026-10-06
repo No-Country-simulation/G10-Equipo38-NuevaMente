@@ -194,9 +194,13 @@ graph TD
 **Tareas**:
 - Wrapper `google-genai` con `output_dimensionality=768` y tarea de preparación (retrieval document / retrieval query) según corresponda.
 - Planificar solicitudes individuales conservando un vector por chunk; no asumir que una lista en una llamada produce vectores independientes ni activar Batch pago.
-- Reintentos transitorios (2, backoff + jitter + Retry-After), error visible si la cuota se agota.
+- Reintentos transitorios centralizados en `ctx.llamar` de Issue 20 (2 adicionales, backoff + jitter + Retry-After), error visible si la cuota se agota.
 - Registro de modelo/dimensión/versión de preparación; el nombre de colección Chroma incorpora modelo+dimensión para obligar reindexado si cambian.
 - Integración con el doble de Gemini de `Issue 10` para tests sin red.
+
+- Usar el cliente síncrono de `google-genai` dentro del worker y `ctx.llamar` por **cada solicitud individual**. El adaptador recibe/aplica timeout y traduce errores transitorios a `ReintentableError`; cuota diaria agotada no se reintenta. El SDK/wrapper no añaden reintentos propios.
+- Agregar `DobleGemini.embed_sync` conservando `embed` async, con lógica y contadores compartidos. El doble no define el comportamiento del SDK real: comprobar con un mock del SDK que 100 chunks generan 100 solicitudes individuales y 100 vectores, sin enviar una lista como un único contenido.
+- Pruebas con `ContextoEjecucion`: resultado resuelto, timeout propagado, reserva por intento, máximo tres intentos técnicos y agotamiento visible de cuota.
 
 **Criterios de aceptación**:
 - [ ] 100 chunks → exactamente 100 vectores de 768 dimensiones.
@@ -216,7 +220,7 @@ graph TD
 - `OCIObjectStorageProvider` con `oci-sdk`: config por archivo o identidad de instancia; namespace por consulta; bucket privado `nuevamente-contenidos-educativos` en la home region.
 - Prefijos exactos de §8.3: `workspaces/`, `source_documents/{ws}/{doc}/original|manifest.json`, `outputs/`, `exports/`, `progress/`, `demo/`.
 - Claves de objeto generadas por el backend (IDs), nombre original solo como metadata — sin colisiones ni rutas manipulables.
-- Reintentos idempotentes máx. 3 con backoff; reintentar una escritura **conserva el mismo objeto_id** (§8.3).
+- Reintentos idempotentes: un intento inicial y hasta dos adicionales (tres intentos totales) con backoff; reintentar una escritura **conserva el mismo objeto_id** (§8.3). Contar cada solicitud del SDK y evitar reintentos duplicados entre SDK y wrapper.
 - Script de verificación: crear bucket si no existe (aprov. manual documentado), put/get/list sobre prefijo de prueba, y conteo de solicitudes para el presupuesto (§8.4).
 - `MOCK_OCI=0` + fallo de OCI → `StorageUnavailable` visible; cero fallback automático a mock.
 

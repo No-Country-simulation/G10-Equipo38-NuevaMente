@@ -43,6 +43,21 @@ from app.jobs.manager import (
 from app.jobs.store import RegistroOperativo
 from app.schemas.enums import JobStatus
 
+
+def test_contexto_rechaza_async_sin_consumir_cuota():
+    cuotas = CuotasProveedor({"m": CuotasModelo(rpd=10)})
+    ctx = ContextoEjecucion("j", "ws", "chat", time.monotonic() + 10, cuotas=cuotas)
+
+    async def proveedor(*, timeout):
+        return "resultado"
+
+    with pytest.raises(TypeError, match="síncrono"):
+        ctx.llamar(proveedor, modelo="m")
+    assert cuotas.disponibles_hoy("m") == 10
+    with pytest.raises(TypeError, match="resuelto"):
+        ctx.llamar(lambda timeout: proveedor(timeout=timeout), modelo="m")
+
+
 pytestmark = pytest.mark.unit
 
 

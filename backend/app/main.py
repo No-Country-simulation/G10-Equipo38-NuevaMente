@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -45,8 +46,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.routes import workspaces
+from app.api.routes import jobs, workspaces
 from app.config import Configuracion, config
+from app.jobs.manager import ControlesOperativos, GestorTrabajos
 from app.jobs.store import RegistroOperativo
 from app.schemas.errors import ErrorAplicacion, ErrorBody, ErrorCode, ErrorResponse
 from app.storage.oci_storage import get_storage_provider
@@ -114,10 +116,26 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
     ajustes = configuracion or config
     ajustes.validar_critico()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        controles = ControlesOperativos(
+            max_en_cola=ajustes.max_queued_jobs,
+            deadline_ejecucion_segundos=ajustes.generation_deadline_seconds,
+        )
+        gestor = GestorTrabajos(app.state.db, controles=controles)
+        app.state.jobs_manager = gestor
+        try:
+            yield
+        finally:
+            # No cerrar SQLite si todavía hay una llamada en vuelo.
+            gestor.detener()
+            app.state.db.cerrar()
+
     app = FastAPI(
         title="NuevaMente API",
         description="Adaptación pedagógica de documentos técnicos (Hackathon ONE — Equipo 38).",
         version="0.1.0",
+        lifespan=lifespan,
         # La referencia viva de estos contratos es docs/contratos-api.md
         # (congelado v1 por el issue #03); /docs es la vista navegable.
         docs_url="/docs",
@@ -256,6 +274,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
     app.state.storage_provider = get_storage_provider(configuracion=ajustes)
 
     app.include_router(workspaces.router)
+    app.include_router(jobs.router)
 
     return app
 

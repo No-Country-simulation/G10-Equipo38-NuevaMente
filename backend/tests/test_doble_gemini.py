@@ -25,6 +25,15 @@ async def test_generar_devuelve_las_respuestas_programadas_en_orden(doble_gemini
     assert "no programada" in await doble_gemini.generar("prompt")
 
 
+async def test_generar_sync_y_async_comparten_cola_y_contadores(doble_gemini):
+    doble_gemini.programar_generacion("sync", "async", RuntimeError("programado"))
+    assert doble_gemini.generar_sync("prompt", timeout=1) == "sync"
+    assert await doble_gemini.generar("prompt") == "async"
+    with pytest.raises(RuntimeError, match="programado"):
+        doble_gemini.generar_sync("prompt")
+    assert doble_gemini.llamadas_generacion == 3
+
+
 async def test_verificar_afirmacion_es_conservador_por_defecto(doble_gemini):
     veredicto = await doble_gemini.verificar_afirmacion("afirmacion", "evidencia")
     assert veredicto["respaldada"] is False  # sin programar => no respalda

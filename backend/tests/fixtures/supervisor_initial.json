@@ -1,0 +1,87 @@
+{
+  "graph_state_version": "1.0",
+  "schema_version": "1.0",
+  "workspace_id": "ws_1",
+  "generation_id": "gen_1",
+  "document_id": "doc_1",
+  "parametros": {
+    "document_id": "doc_1",
+    "perfil_destinatario": "principiante",
+    "formato_salida": "flashcards",
+    "nicho_sector": "general",
+    "nivel_detalle": "didactico",
+    "idioma_salida": "pt",
+    "alcance": {
+      "tipo": "documento_completo",
+      "seccion_id": null
+    }
+  },
+  "documento_fuente": {
+    "document_id": "doc_1",
+    "titulo": "Documento técnico",
+    "hash": "sha256:abc",
+    "version": "v1",
+    "procedencia": null
+  },
+  "source_hash": "sha256:abc",
+  "idioma_origen": "en",
+  "secciones_disponibles": [
+    "sec_1",
+    "sec_2"
+  ],
+  "secciones_cubiertas": [],
+  "evidencia": [],
+  "referencias": [],
+  "restricciones": {
+    "formato": "flashcards",
+    "idioma_salida": "pt",
+    "orientacion_perfil": "Explicar fundamentos sin jerga sin definir; pasos breves y analogías etiquetadas.",
+    "requisitos_formato": [
+      "un concepto por tarjeta",
+      "frente y dorso",
+      "IDs únicos",
+      "referencias por tarjeta"
+    ],
+    "max_redacciones": 3,
+    "max_llamadas": 20,
+    "evidencia_exclusiva": true,
+    "ejemplos_etiquetados": true,
+    "citas_en_idioma_original": true,
+    "preservar_identificadores_tecnicos": true
+  },
+  "rubrica": {
+    "score_minimo": 0.85,
+    "dimensiones": [
+      "claridad_pedagogica",
+      "adecuacion_perfil",
+      "cobertura_objetivos",
+      "coherencia_didactica"
+    ],
+    "bloqueos": [
+      "afirmacion_sin_respaldo",
+      "contradiccion",
+      "cita_invalida",
+      "cobertura_incompleta",
+      "evaluacion_incompleta",
+      "verificacion_visual_insuficiente"
+    ],
+    "requiere_revision_visual": false
+  },
+  "borrador": null,
+  "evaluacion_factual": null,
+  "evaluacion_visual": [],
+  "evaluacion_pedagogica": null,
+  "afirmaciones_fallidas": [],
+  "feedback": [],
+  "intento": 0,
+  "presupuesto": {
+    "limite": 20,
+    "usadas": 0
+  },
+  "deadline": 1000000000000.0,
+  "status": "running",
+  "error": null,
+  "persistencia": null,
+  "almacenamiento": null,
+  "trazabilidad": null
+}
