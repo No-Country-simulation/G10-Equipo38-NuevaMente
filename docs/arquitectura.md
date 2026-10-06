@@ -247,6 +247,8 @@ graph LR
 
 Cola (§7.5): 1 trabajo intensivo global (compartido por ingestión, generación, chat y glosario) · cola ≤5 con posición visible y cancelación · 1 trabajo por espacio · deadline 300 s · timeout por llamada 60 s · 2 reintentos transitorios con backoff/jitter. Estados: `queued · running · completed · rejected_quality · failed · cancelled`.
 
+El worker ejecuta proveedores Gemini síncronos; cada solicitud real y cada retry pasan por `ctx.llamar`. El grafo usa `invoke` dentro del worker. La API entrega 202 para trabajo en segundo plano y SSE sigue disponible sin requerir un SDK async. El gestor y las rutas comunes de estado/eventos/cancelación pertenecen a Issue 20; los consumidores no crean otro gestor ni otra cola. [Contrato interno de proveedores y trabajos](contratos-api.md#contrato-de-ejecución-de-proveedores-issues-13-y-20).
+
 ---
 
 ## 9. Despliegue en OCI Compute Always Free

@@ -147,6 +147,8 @@ graph TD
 
 - Aplicar política completa de Issue 29 (citas, visual, cobertura e intentos), no solo score. Usar cola común y devolver 202 con job_id/status_url/events_url/cancel_url.
 
+- Chat y embeddings de consulta usan adaptadores síncronos y el contexto compartido de Issue 20; cada intento real pasa por su control central. Reutilizar status/events/cancel de trabajos comunes, sin crear otra cola.
+
 **Criterios de aceptación**:
 - [ ] Pregunta sobre VCN responde con cita verificable; pregunta fuera de alcance responde «la fuente no lo cubre».
 - [ ] El historial no contamina: una respuesta anterior no se usa como evidencia de la siguiente.
@@ -188,6 +190,8 @@ graph TD
 - Término original + traducción cuando corresponde; identificadores de APIs/comandos/productos **sin traducir**; término sin definición suficiente → limitación declarada, no invención.
 
 - Usar cola y política completa de revisión; 202 con URLs del trabajo y cancelación, o 200 para caché aprobada. Clave de caché incluye espacio, documento/version, modelo, perfil, idioma y prompt.
+
+- Generación de definiciones, juez y embeddings usan adaptadores síncronos con el contexto común; cada solicitud real reserva cuota. La caché aprobada no consume llamadas ni crea un trabajo nuevo.
 
 **Criterios de aceptación**:
 - [ ] Glosario del doc VCN para Principiante/es incluye conceptos clave con citas válidas.

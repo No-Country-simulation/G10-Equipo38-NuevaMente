@@ -36,6 +36,7 @@ graph TD
     I14 --> I19
     I20 --> I19
     I08 --> I20
+    I09 --> I20
     I03 --> I21
     I03 --> I22
     I21 --> I23
@@ -63,6 +64,8 @@ graph TD
 - Operaciones: indexar documento (con embeddings de `Issue 13`), borrar índice de un documento (cuando se borra la fuente), reindexar por hash reutilizable (§4.5).
 - Rutina de reconstrucción completa del índice desde los originales de OCI (para pérdida de VM — §9.3).
 
+- Indexar y reconstruir pasan el contexto de ejecución a embeddings; cada solicitud usa el contrato síncrono de Issue 13 y las cuotas de Issue 20, incluida la reconstrucción de la demo. Probar integración con el contexto, no solo vectores precalculados.
+
 **Criterios de aceptación**:
 - [ ] Indexar documento → buscar → los resultados son solo chunks de ese documento/espacio.
 - [ ] Un query con `document_id` ajeno no devuelve nada (test de aislamiento cruzado).
@@ -83,6 +86,8 @@ graph TD
 - Deduplicación de chunks y recorte por presupuesto de tokens (12k configurable) con aviso cuando se recorta.
 - Salida tipada: chunks con `chunk_id`, texto, metadatos de procedencia y score — lista para citar en `PedagogicalOutput.referencias`.
 - Preparación de consulta multilingüe (preparación diferenciada y compatible para consultas y documentos).
+
+- El embedding de consulta también usa la interfaz síncrona y `ctx.llamar`; propagar el mismo contexto desde Researcher/chat/glosario, sin contadores ni reintentos independientes.
 
 **Criterios de aceptación**:
 - [ ] Una consulta sobre el doc demo VCN recupera chunks pertinentes con diversidad (no 5 copias del mismo párrafo).
@@ -111,8 +116,10 @@ graph TD
 - Borrado: bloquear acceso/cancelar trabajos antes de limpiar, y comprobar tombstones antes de publicar. Fallos físicos dejan limpieza pendiente.
 - Conectar Issue 30 antes de declarar ready una fuente que necesite interpretación visual.
 
+- Usar los endpoints comunes de trabajos ya provistos por Issue 20 para status/events/cancel; este issue solo crea el trabajo de ingestión y devuelve sus URLs. `Asíncrono` significa segundo plano en la cola, con proveedores síncronos dentro del worker.
+
 **Criterios de aceptación**:
-- [ ] Subir el PDF VCN → 202 → polling hasta `ready` → los metadatos informan páginas procesadas.
+- [ ] Subir un PDF textual → 202 → polling hasta `ready`, con páginas procesadas. El PDF VCN con diagrama conserva visión pendiente hasta conectar Issue 30; no se declara `ready` anticipadamente.
 - [ ] El original queda en `source_documents/{ws}/{doc}/original` y el manifest en `…/manifest.json` antes de `ready`.
 - [ ] Subir duplicado con misma Idempotency-Key no crea segundo documento.
 - [ ] `DELETE` borra original, chunks del índice y derivados; re-subir funciona limpio.
@@ -123,7 +130,7 @@ graph TD
 ---
 
 ### `Issue 20` — Gestor de trabajos: cola, estados, deadline y cancelación
-**F2** · **API** · **L** · **Depende de**: `Issue 08` · **Referencia**: decisiones_proyecto.md §7.5, §14.2
+**F2** · **API** · **L** · **Depende de**: `Issue 08`, `Issue 09` · **Referencia**: decisiones_proyecto.md §7.5, §14.2
 
 **Objetivo**: ejecutor de trabajos intensivos con las cuotas operativas acordadas: 1 trabajo activo global, cola de 5, 1 por espacio, deadlines y cancelación.
 
@@ -139,14 +146,20 @@ graph TD
 - Exponer GET /api/jobs/{id}, GET /api/jobs/{id}/events y POST /api/jobs/{id}/cancel para ingestión/chat/glosario; mismo gestor y ownership que generaciones.
 - Mantener ocupada la ranura global hasta terminar llamadas en vuelo aunque se cancele; revalidar cancelación/borrado antes de persistir.
 
+- Implementar las tres rutas comunes en `api/routes/jobs.py` con autenticación, ownership y el contrato `TrabajoComunResponse`; generaciones conservan sus rutas y vista estudiante, sin exponer su canónico por `/api/jobs`.
+- Iniciar/detener el gestor con el lifespan de FastAPI. SSE revalida sesión/espacio, respeta `Last-Event-ID`, emite heartbeats, cierra al terminar y no cancela al desconectar.
+
 **Criterios de aceptación**:
+- [x] Consulta propia → 200; inexistente/ajena → 404; sin sesión → 401. No entrega borradores de trabajos fallidos/cancelados/rechazados.
+- [x] Cancelación en cola y en ejecución, repetición idempotente de `cancelled`, otros terminales → 409.
+- [x] SSE con cursor válido, heartbeat y cierre por revocación; reconexión sin repetir el trabajo ni exponer resultados.
 - [ ] Dos generaciones simultáneas desde espacios distintos: una corre, la otra queda en cola con posición consultable.
 - [ ] Con un trabajo activo y cinco en espera, una solicitud adicional → 429 con mensaje claro.
 - [ ] Cancelar en cola la saca sin ejecutarla; cancelar en ejecución termina el grafo sin publicar contenido.
 - [ ] Un trabajo que excede 300 s de ejecución termina `failed/DEADLINE`.
 - [ ] La API responde `/health` y a consultas mientras un trabajo corre.
 
-**Verificación**: `pytest backend/tests/test_jobs_manager.py` con trabajo sintético configurable (duración, fallo, cancelación).
+**Verificación**: `pytest backend/tests/test_jobs_manager.py backend/tests/test_api_jobs.py` con trabajo sintético configurable (duración, fallo, cancelación).
 
 ---
 
@@ -159,6 +172,8 @@ graph TD
 - `agents/graph_state.py`: estado con todos los campos de §5.4 (parámetros normalizados, hashes, evidencia tipada con citas, borrador tipado, evaluaciones, intento, llamadas consumidas, deadline, estado del trabajo, referencias de persistencia).
 - `agents/supervisor.py`: valida parámetros/idioma/permisos/alcance, aplica plantillas del perfil+formato, fija restricciones y rúbrica de salida; devuelve solo campos de restricción (sin llamadas LLM — §3.1).
 - Normalización de idioma de origen (detección como metadata, nunca pisa la elección del usuario — §17.2).
+
+- Propagar el contexto de ejecución como dependencia de runtime del grafo, sin serializar tokens, clientes SDK, locks ni el propio contexto en el estado pedagógico. Los contadores del estado reflejan solicitudes reales, no sustituyen las cuotas centrales.
 
 **Criterios de aceptación**:
 - [ ] El Supervisor con parámetros inválidos (formato inexistente, documento no `ready`) termina el trabajo `failed` con diagnóstico, sin gastar llamadas LLM.
@@ -205,6 +220,8 @@ graph TD
 
 - Correcciones de esquema y citas consumen el límite global de tres redacciones y el presupuesto de llamadas; no crear retries internos que permitan más borradores.
 
+- Llamada Gemini síncrona mediante `ctx.llamar`, con timeout y errores compatibles. Agregar al doble una entrada síncrona de generación sin retirar `generar` async. Los reintentos técnicos son del gestor; correcciones de esquema/citas consumen las redacciones del grafo.
+
 **Criterios de aceptación**:
 - [ ] Con el doble de Gemini, produce un `FlashcardDeck` válido con citas a chunk_ids presentes en la evidencia.
 - [ ] Una cita inventada por el doble se detecta y corrige antes de salir del nodo.
@@ -245,7 +262,7 @@ graph TD
 **Tareas**:
 - `components/sidebar.py` (bloque carga): `st.file_uploader` con límites visibles **antes** de cargar (§4.1) y validación temprana de extensión/tamaño.
 - Alternativa «pegar texto» con título + contenido (se envía como documento TXT).
-- Biblioteca demo: tarjetas de los 3 documentos precargados (`Issue 05`) listos para usar.
+- Biblioteca demo: tarjetas de los 3 documentos de `Issue 05` con su estado real informado por la API; generar solo cuando estén `ready`. Una fuente con visión pendiente permanece en procesamiento hasta Issue 30. Issue 49 prepara la biblioteca desplegada en la VM.
 - Panel de estado: `processing` con etapas reales de ingestión, `ready` con cobertura (páginas procesadas), `failed` con causa accionable y opción de reintentar con otro archivo.
 - Indicador de almacenamiento: «Guardado en OCI» solo tras confirmación real; «Almacenamiento local de desarrollo» cuando `MOCK_OCI=1` (§8.2).
 - Lista de documentos del espacio con borrado (confirmación con consecuencias visibles).

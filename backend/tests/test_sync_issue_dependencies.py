@@ -17,7 +17,7 @@ DIRECTORIO_SCRIPTS = Path(__file__).resolve().parents[2] / ".github" / "scripts"
 if str(DIRECTORIO_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(DIRECTORIO_SCRIPTS))
 
-from sync_issue_dependencies import sync_markdown_checkboxes  # noqa: E402
+from sync_issue_dependencies import sync_markdown_checkboxes, sync_status_labels  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -86,3 +86,25 @@ def test_idempotencia_sin_cambios_necesarios():
 def test_manejo_cuerpo_vacio():
     """Un cuerpo vacío o None no debe lanzar excepción."""
     assert sync_markdown_checkboxes("", {1, 2}) == ("", False)
+
+
+@pytest.mark.parametrize("cerrados,esperada", [({9, 15}, "status:ready"), ({15}, "status:blocked")])
+def test_etiquetas_siguen_dependencias_y_preservan_squad(cerrados, esperada):
+    issue = {
+        "state": "open",
+        "body": "**Depende de**: `Issue 15`, `Issue 09` · **Referencia**: contrato",
+        "labels": [{"name": "squad:1"}, {"name": "UI"}, {"name": "status:blocked"}],
+    }
+    etiquetas, cambio = sync_status_labels(issue, cerrados)
+    assert set(etiquetas) == {"squad:1", "UI", esperada}
+    assert cambio == (esperada == "status:ready")
+
+
+def test_issue_cerrado_no_se_presenta_como_bloqueado():
+    issue = {"state": "closed", "labels": [{"name": "API"}, {"name": "status:blocked"}]}
+    assert sync_status_labels(issue, set()) == (["API"], True)
+
+
+def test_sin_dependencias_declaradas_conserva_etiquetas():
+    issue = {"state": "open", "body": "Tarea externa", "labels": [{"name": "status:blocked"}]}
+    assert sync_status_labels(issue, set()) == (["status:blocked"], False)

@@ -3,7 +3,7 @@
 > **Proyecto**: NuevaMente — Sistema Inteligente de Adaptación y Generación de Contenido Educativo
 > **Equipo**: Grupo 10 · Equipo 38 — Oracle Next Education (ONE) / Alura Latam
 > **Documento fuente**: [`decisiones_proyecto.md`](../decisiones_proyecto.md) (todas las decisiones de diseño ya están tomadas ahí)
-> **Estado**: Plan revisado — v1.1 · Septiembre 2026
+> **Estado**: Plan revisado — v1.2 · Octubre 2026
 
 Este plan traduce el documento de decisiones en **60 issues concretos**, organizados en **7 fases**, distribuidos en **6 carriles de trabajo paralelo**, con dependencias explícitas que permiten que varios integrantes avancen simultáneamente sin bloquearse entre sí.
 
@@ -54,6 +54,10 @@ Los principios que ordenan este plan (derivados de `decisiones_proyecto.md`):
 6. **La calidad es parte del flujo**: cada issue incluye sus tests; no existe una "semana de testing al final" (sí existen issues dedicados de integración/E2E en Fase 5).
 
 ---
+
+Los contratos internos de ejecución están precisados en [contratos-api.md](contratos-api.md#contrato-de-ejecución-de-proveedores-issues-13-y-20): proveedores Gemini síncronos dentro del worker, reintentos y cuotas centralizados en Issue 20 y dobles compatibles. Los endpoints comunes de trabajos también pertenecen a Issue 20. Cada consumidor y sus tests deben conservar este contrato.
+
+H2 verifica indexación y recuperación con fuentes textuales. Una fuente con visión pendiente no pasa a `ready`; Issue 30 completa la ingestión del PDF VCN con diagrama en H3. La revisión de seguridad de Issue 51 aporta sus propias pruebas, que Issue 53 reutiliza sin crear una dependencia inversa.
 
 ## 3. Carriles de trabajo paralelo
 
@@ -128,7 +132,7 @@ Tamaños: **S** ≤ medio día · **M** ≈ 1 día · **L** ≈ 1–2 días. El 
 | `Issue 09` | Workspaces anónimos, código de recuperación y sesiones | API | L | `Issue 08`, `Issue 04` |
 | `Issue 11` | Parser y validación de documentos (PDF/MD/TXT + texto pegado) | RAG | L | `Issue 03`, `Issue 05`, `Issue 10` |
 | `Issue 12` | Chunker estructural con metadatos y `chunk_id` estable | RAG | M | `Issue 11` |
-| `Issue 13` | Cliente de embeddings Gemini (768 d, batch, reintentos) | RAG | M | `Issue 03`, `Issue 10` |
+| `Issue 13` | Cliente de embeddings Gemini síncrono (768 d, solicitudes individuales, cuotas centralizadas) | RAG | M | `Issue 03`, `Issue 10` |
 | `Issue 14` | Proveedor OCI Object Storage real (bucket Always Free, prefijos) | INF | M | `Issue 04` |
 | `Issue 15` | Esqueleto Streamlit con tema Linear | UI | M | `Issue 03`, `Issue 06` |
 | `Issue 16` | Cliente de API y gestión de sesión en el frontend | UI | M | `Issue 15`, `Issue 09` |
@@ -141,7 +145,7 @@ Tamaños: **S** ≤ medio día · **M** ≈ 1 día · **L** ≈ 1–2 días. El 
 | `Issue 17` | Vector store ChromaDB con aislamiento por espacio | RAG | M | `Issue 12`, `Issue 13`, `Issue 14` |
 | `Issue 18` | Retriever MMR con presupuesto de evidencia | RAG | M | `Issue 17` |
 | `Issue 19` | Endpoints de documentos (upload, estado, listado, fuentes, borrado) | API | L | `Issue 09`, `Issue 17`, `Issue 14`, `Issue 20` |
-| `Issue 20` | Gestor de trabajos: cola, estados, deadline y cancelación | API | L | `Issue 08` |
+| `Issue 20` | Gestor de trabajos: cola, estados, deadline y cancelación | API | L | `Issue 08`, `Issue 09` |
 | `Issue 21` | Estado compartido del grafo y Supervisor | AGT | M | `Issue 03` |
 | `Issue 22` | Biblioteca de prompts por perfil/formato/nicho/idioma | AGT | L | `Issue 03` |
 | `Issue 23` | Writer con salida tipada y citas | AGT | L | `Issue 21`, `Issue 22`, `Issue 10` |

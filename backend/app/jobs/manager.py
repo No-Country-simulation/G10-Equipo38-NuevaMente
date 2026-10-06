@@ -50,13 +50,13 @@ llamadas": el trabajo termina failed/CUOTA_AGOTADA, sin insistir cada
 pocos segundos. Los valores por defecto son conservadores y se calibran
 con la cuenta real (§7.5); se inyectan por configuración.
 
-Los endpoints HTTP (GET /api/jobs/{id}, /events, /cancel) se cablean en
-#31/#19 junto con las sesiones de #9: sin autenticación y ownership no se
-exponen rutas (contratos-api.md los exige autenticados).
+Los endpoints HTTP comunes pertenecen a #20 y viven en api/routes/jobs.py,
+con sesiones y ownership de #9. #19/#31/#37/#39 consumen el mismo gestor.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import random
@@ -265,6 +265,8 @@ class ContextoEjecucion:
         La llamada conserva la ranura hasta retornar aunque se cancele.
         Cada intento del proveedor debe pasar por este método.
         """
+        if inspect.iscoroutinefunction(funcion):
+            raise TypeError("ctx.llamar requiere un adaptador síncrono")
         for intento in range(self.reintentos_transitorios + 1):
             self.chequear()
             if self.cuotas is None:
@@ -274,6 +276,10 @@ class ContextoEjecucion:
             inicio = time.monotonic()
             try:
                 resultado = funcion(timeout=timeout)
+                if inspect.isawaitable(resultado):
+                    if inspect.iscoroutine(resultado):
+                        resultado.close()
+                    raise TypeError("El adaptador debe devolver un resultado resuelto")
                 self.chequear()
                 if time.monotonic() - inicio > timeout:
                     raise ReintentableError("La llamada excedió su timeout")
@@ -392,7 +398,7 @@ class GestorTrabajos:
         return identificador
 
     def estado(self, job_id: str) -> dict | None:
-        """Consulta del trabajo (GET /api/jobs/{id} de #31): estado, error y
+        """Consulta del trabajo (GET /api/jobs/{id} de #20): estado, error y
         posición si sigue en cola."""
         with self._lock:
             self._barrer_cola_expirada()
