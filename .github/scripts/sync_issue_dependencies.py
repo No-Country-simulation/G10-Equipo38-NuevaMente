@@ -2,7 +2,7 @@
 
 Lee todos los issues del repositorio, identifica cuáles están cerrados y
 actualiza las casillas de verificación de dependencias (`- [x] #N` vs `- [ ] #N`)
-en los cuerpos Markdown de cada issue.
+en los cuerpos Markdown de cada issue y sus etiquetas de disponibilidad.
 
 Preserva intactas todas las demás casillas (como criterios de aceptación o tareas)
 que no correspondan a referencias de dependencias hacia otros issues.
@@ -111,10 +111,26 @@ def fetch_all_issues(repo: str, token: str) -> list[dict[str, Any]]:
     return issues
 
 
-def update_issue_body(repo: str, issue_number: int, new_body: str, token: str) -> None:
+def sync_status_labels(issue: dict, closed_issue_numbers: set[int]) -> tuple[list[str], bool]:
+    """Conservar etiquetas técnicas y derivar disponibilidad de dependencias explícitas."""
+    originales = [label["name"] for label in issue.get("labels", [])]
+    etiquetas = [label for label in originales if label not in ("status:ready", "status:blocked")]
+    if issue.get("state") != "closed":
+        match = re.search(r"\*\*Depende de\*\*:([^\n]*?)(?: ·|$)", issue.get("body") or "", re.M)
+        if match is None:
+            return originales, False
+        dependencias = {int(numero) for numero in re.findall(r"Issue (\d+)", match.group(1))}
+        etiquetas.append("status:ready" if dependencias <= closed_issue_numbers else "status:blocked")
+    return etiquetas, set(etiquetas) != set(originales)
+
+
+def update_issue_body(repo: str, issue_number: int, new_body: str, token: str, labels: list[str] | None = None) -> None:
     """Actualiza el cuerpo de un issue vía API REST de GitHub."""
     url = f"https://api.github.com/repos/{repo}/issues/{issue_number}"
-    payload = json.dumps({"body": new_body}).encode("utf-8")
+    datos: dict[str, Any] = {"body": new_body}
+    if labels is not None:
+        datos["labels"] = labels
+    payload = json.dumps(datos).encode("utf-8")
     req = _crear_request(url, token, metodo="PATCH", data=payload)
     try:
         with urllib.request.urlopen(req) as resp:
@@ -152,15 +168,20 @@ def sync_repository_issues(
         num = iss["number"]
         body_original = iss.get("body") or ""
         nuevo_body, cambio = sync_markdown_checkboxes(body_original, closed_numbers)
+        nuevo_body = nuevo_body.replace(
+            "### ⛔ Bloqueado por (Predecesoras requeridas):", "### Dependencias (Predecesoras requeridas):"
+        )
+        cambio = cambio or nuevo_body != body_original
+        etiquetas, cambio_etiquetas = sync_status_labels(iss, closed_numbers)
 
-        if cambio:
+        if cambio or cambio_etiquetas:
             modificados += 1
             if dry_run:
                 print(f"[DRY-RUN] Issue #{num} requiere actualización de dependencias.")
             else:
                 if verbose:
                     print(f"[*] Actualizando dependencias en issue #{num}...")
-                update_issue_body(repo, num, nuevo_body, token)
+                update_issue_body(repo, num, nuevo_body, token, labels=etiquetas if cambio_etiquetas else None)
                 if verbose:
                     print(f"[OK] Issue #{num} actualizado exitosamente.")
 

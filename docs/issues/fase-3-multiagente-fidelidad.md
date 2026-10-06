@@ -60,6 +60,8 @@ graph TD
 - Evidencia tipada en el estado: chunks con `chunk_id`, texto, procedencia y notas de uso (§5.4).
 - Sin instrucciones del documento interpretadas como propias (evidencia = datos, no comandos).
 
+- Propagar el contexto a cada consulta de Issue 18. Si se usa Gemini para formular consultas, sus solicitudes también pasan por `ctx.llamar` y cuentan en el presupuesto de generación; la formulación determinista no consume llamadas.
+
 **Criterios de aceptación**:
 - [ ] Para el doc VCN con alcance completo, el estado lista evidencia de todas las secciones principales (cobertura reportada).
 - [ ] Alcance de una sección específica recupera solo evidencia de esa sección.
@@ -83,6 +85,8 @@ graph TD
 
 - Definir interfaz y doble del verificador visual; hasta conectar Issue 30, evidencia visual necesaria devuelve insuficiente, nunca aprobación por omisión.
 
+- El transporte Gemini del juez y de la verificación visual es síncrono y pasa cada solicitud por `ctx.llamar`. Mantener los métodos async del doble y añadir entradas sync reutilizando lógica/contadores. Probar que un retry del juez consume cuota y presupuesto, sin otra capa de retries.
+
 **Criterios de aceptación**:
 - [ ] Borrador con una afirmación inventada → veredicto con esa afirmación marcada y feedback de corrección, aunque el score quede ≥0.85 (bloqueo por afirmación, no solo por promedio).
 - [ ] Score 0.75 con intentos disponibles → feedback y no aprobación.
@@ -105,6 +109,8 @@ graph TD
 - Terminales: `completed` (solo tras persistencia), `rejected_quality` (diagnóstico breve: evidencia insuficiente / contradicción / cobertura incompleta / calidad pedagógica), `failed`, `cancelled`.
 - El grafo termina **siempre** en un estado terminal explícito (§19.3); sin ciclos sin salida.
 - Emisión de eventos de paso para el gestor de trabajos (paso, intento) — insumo del SSE.
+
+- Ejecutar el grafo con `invoke` en el worker de Issue 20 y compartir su contexto entre nodos. Contar cada solicitud real, incluidos retries técnicos, para el límite de 20; tres redacciones pedagógicas y tres intentos técnicos por solicitud son límites distintos. No reiniciar el pipeline por fallos transitorios.
 
 **Criterios de aceptación**:
 - [ ] Flujo feliz con doble: aprobación en 1.er intento → paquete `PedagogicalOutput` completo.
@@ -130,6 +136,8 @@ graph TD
 - Descripciones embebidas e indexadas en Chroma (filtrables) para que Researcher las recupere y Writer las cite.
 - Extensión del Critic: `verificacion_visual` contrasta afirmaciones derivadas de diagramas contra la página original (no la descripción contra sí misma — §19.2); evidencia visual indispensable no verificable → no aprobación.
 - Reporte de omisiones visuales: nunca se presenta una adaptación incompleta como completa (§4.2).
+
+- Visión y embeddings derivados usan adaptadores síncronos y el mismo contexto, timeout y cuotas centrales; sin retries adicionales. Completar el documento visual pendiente de Issue 19 y comprobar que el PDF VCN pasa a `ready` solo tras informar cobertura y omisiones.
 
 **Criterios de aceptación**:
 - [ ] El PDF VCN genera ≥1 descripción de diagrama con página de origen referenciable y visible en «Ver la fuente».
@@ -157,6 +165,8 @@ graph TD
 - `almacenamiento_oci` canónico solo con bucket/objeto_id; la confirmación se agrega en persistencia.status_upload de la respuesta del trabajo.
 
 - Ofrecer vista estudiante explícita de quiz, sin claves ni justificaciones iniciales; canónico completo mediante exportación autorizada.
+
+- Reutilizar el gestor y los endpoints comunes de Issue 20; implementar aquí únicamente las rutas propias de generaciones. El grafo corre en segundo plano con proveedores síncronos, sin bloquear la API ni SSE.
 
 **Criterios de aceptación**:
 - [ ] El ejemplo del enunciado (VCN + Principiante + Flashcards) produce una respuesta con la forma de §16.3 vía API (con LLM real en la prueba manual).

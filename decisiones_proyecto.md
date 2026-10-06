@@ -618,6 +618,8 @@ No se fijan cifras universales de 15 RPM o un millón de TPM. [Límites oficiale
 
 Estos valores se calibran con la cuenta real; no constituyen una promesa de latencia.
 Las cuotas se comparten entre usuarios y nodos, incluido el evaluador.
+
+Las llamadas Gemini usan adaptadores síncronos dentro del worker dedicado. Cada solicitud pasa por `ctx.llamar` con timeout y reserva de cuota por intento; los wrappers y el SDK no añaden reintentos. El procesamiento en segundo plano de la API no exige clientes Python asíncronos. Los dobles conservan sus métodos async y ofrecen entradas sync que reutilizan lógica y contadores. La política separada de OCI y los contratos HTTP de trabajos se precisan en `docs/contratos-api.md`.
 La ingestión reserva su presupuesto de embeddings e interpretación antes de comenzar.
 La cuota diaria agotada detiene nuevas llamadas; no se insiste cada pocos segundos.
 La corrección de quizzes ya generados es determinista y no consume otra llamada LLM.

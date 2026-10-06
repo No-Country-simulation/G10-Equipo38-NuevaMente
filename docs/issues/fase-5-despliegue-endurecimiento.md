@@ -142,6 +142,8 @@ graph TD
 - Verificar que la demo distingue una ejecución nueva de una recuperación de contenido guardado (§18.3).
 - Documentar el runbook de recarga de la demo (para reinicios de VM).
 
+- Preindexar y reconstruir ejecutan embeddings síncronos bajo el gestor/contexto común, con cuotas por modelo y sin bucles extra de reintentos. Registrar solicitudes reales incluso en mantenimiento.
+
 **Criterios de aceptación**:
 - [ ] Desde la app pública, «probar documento demo» permite generar sin subir nada.
 - [ ] El catálogo de fuentes funciona aún sin resultados; el estado vacío no simula ejemplos.
@@ -191,7 +193,7 @@ graph TD
 **Criterios de aceptación**:
 - [ ] Checklist §11 completo con evidencia por ítem (documento de revisión en `docs/`).
 - [ ] Escaneo de secretos del historial de Git limpio.
-- [ ] Intentos de acceso cruzado entre espacios (documento, SSE, export, progreso) → todos 404 (suite de `Issue 53`).
+- [ ] Pruebas de seguridad de este issue: accesos cruzados entre espacios a documento, SSE, export y progreso devuelven 404. Issue 53 reutiliza estas pruebas; cerrar Issue 51 no depende de completar Issue 53.
 
 **Verificación**: documento de revisión + rerun de tests de aislamiento.
 
@@ -209,6 +211,8 @@ graph TD
 - Errores HTTP §7.3: 400/401/404/409/413/422/429/500/503 con envoltorio y `request_id`.
 - Aislamiento cruzado entre dos espacios sobre los mismos recursos.
 - Reintento de persistencia (`persist`) tras `STORAGE_UNAVAILABLE` simulado.
+
+- Cubrir proveedor síncrono → `ctx.llamar` → worker → API: cuota por intento, timeout propagado, retries limitados y no duplicados, cancelación sin publicación y reconexión SSE sin nueva ejecución. Probar los endpoints comunes de Issue 20 además de los de generación.
 
 **Criterios de aceptación**:
 - [ ] Cobertura de los estados de trabajo y códigos de error del contrato.
@@ -230,12 +234,14 @@ graph TD
 - Etiquetado de cada criterio §12.2 con su test o su paso de protocolo.
 - Ejecución contra el despliegue público (no solo local).
 
+- Las pruebas E2E simuladas llevan ambas marcas `e2e` e `integration_mock` y se ejecutan en CI ordinaria. Las pruebas reales llevan `integration_real`, usan credenciales explícitas y quedan fuera de PRs ordinarios. Reutilizar las pruebas de seguridad aportadas por Issue 51.
+
 **Criterios de aceptación**:
 - [ ] Los 14 criterios tienen cobertura (test o protocolo) y pasan.
 - [ ] La suite automatizada corre en CI con dobles.
 - [ ] El protocolo manual tiene evidencia archivada (capturas/video) sobre la URL pública.
 
-**Verificación**: `pytest -m e2e` + protocolo manual firmado por 2 personas.
+**Verificación**: `pytest -m "e2e and not integration_real"` + protocolo manual firmado por 2 personas.
 
 ---
 
@@ -249,6 +255,8 @@ graph TD
 - Registro del consumo de solicitudes de storage generadas (insumo del presupuesto `Issue 50`).
 - Fotos/capturas de la cons OCI mostrando los objetos escritos (prefijos §8.3).
 - Marcado `integration_real`; nunca en PRs de terceros (§12.3).
+
+- La corrida real usa los mismos adaptadores síncronos y controles del worker que producción; verificar timeout, contador de solicitudes y ausencia de retries adicionales del SDK. No sirve como evidencia un cliente aislado que eluda el gestor.
 
 **Criterios de aceptación**:
 - [ ] Una corrida completa real queda documentada con evidencia (JSON de respuesta + objeto en OCI + captura).

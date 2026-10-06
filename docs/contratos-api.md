@@ -141,6 +141,16 @@ Listado paginado con filtros: `documento`, `perfil`, `formato`, `idioma`, `desde
 | `POST /api/progress/events` | Eventos idempotentes (`event_id` estable): `concepto_revisado`, `flashcard_vista`, el evento respuesta_quiz es interno y lo crea el endpoint de respuestas; primer_intento y acierto los calcula exclusivamente el backend. |
 | `GET /api/progress` | Agregados del espacio: conceptos, flashcards, aciertos de primer intento, tiempo restante estimado. |
 
+### Contrato de ejecución de proveedores (issues 13 y 20)
+
+- Las llamadas a Gemini usan adaptadores **síncronos** dentro del worker dedicado. Los endpoints HTTP pueden devolver 202 y procesar en segundo plano; esto no exige usar `async` en el SDK. El stream SSE sí espera sin bloquear la API.
+- Cada solicitud real a Gemini pasa por `ctx.llamar(funcion, modelo=..., tokens_estimados=...)`; `funcion` recibe `timeout` en segundos y devuelve el resultado resuelto, nunca una corutina. El adaptador convierte el timeout a las unidades del SDK y traduce fallos transitorios a `ReintentableError`, conservando `Retry-After` cuando exista. Una cuota diaria agotada se propaga sin reintentar.
+- El gestor es el único dueño de los reintentos de Gemini: hasta dos adicionales, tres intentos técnicos en total. Desactivar reintentos automáticos del SDK y evitar bucles adicionales del wrapper. Cada intento reserva cuota y consume el presupuesto que corresponda. Las tres redacciones pedagógicas son otro límite; no se repite el pipeline por un fallo técnico.
+- Los presupuestos RPM/TPM/RPD se comparten por modelo; el límite de 20 solicitudes de generación/redacción/revisión no convierte 100 embeddings en 20. El grafo aplica su presupuesto además de las cuotas del modelo, incluidos reintentos y verificaciones visuales de la generación.
+- `DobleGemini` conserva `embed`, `generar` y `verificar_afirmacion` asíncronos. Agregar `embed_sync` en Issue 13 y las entradas síncronas de generación/verificación al implementar sus consumidores; reutilizar la misma lógica, respuestas y contadores. Los dobles se habilitan explícitamente solo en desarrollo/CI.
+- OCI mantiene la política propia de Issue 14: escrituras idempotentes, hasta tres intentos totales y contabilización de solicitudes de storage. No usa cuotas Gemini ni añade otro bucle a `ctx.llamar`.
+- Los endpoints comunes `GET /api/jobs/{id}`, `GET /api/jobs/{id}/events` y `POST /api/jobs/{id}/cancel` pertenecen a **Issue 20**. Issue 19 los consume, sin volver a implementarlos. El gestor se inicia y detiene en el lifespan de la API; al detenerse se espera su worker antes de cerrar SQLite.
+
 ### Trabajos comunes (Issue 20)
 
 GET /api/jobs/{id}, GET /api/jobs/{id}/events y POST /api/jobs/{id}/cancel permiten consultar, seguir y cancelar ingestión/chat/glosario.
@@ -151,6 +161,11 @@ SSE usa job_id para trabajos comunes y generation_id para generaciones; id monot
 Cerrar la conexión no cancela. Cancelar, fallar o rechazar nunca entrega borrador.
 Chat/glosario usan Idempotency-Key por intención; caché aprobada puede responder 200.
 Upload conserva document_id y agrega las URLs del trabajo de ingestión.
+
+- Consulta y cancelación responden 200 con `TrabajoComunResponse`: `job_id`, `status`, `status_url`, `events_url`, `cancel_url`, `posicion_cola`, `result` y `error`. `result` solo aparece con valor en `completed`; los demás estados no entregan borradores. `cancel_url` queda nulo al terminar y la posición solo aplica a `queued`.
+- Cancelar en cola devuelve `cancelled`; en ejecución puede devolver `running` hasta que el worker observe el flag. Repetir una cancelación ya completada como `cancelled` es idempotente. Otro estado terminal devuelve 409 `INVALID_STATE`.
+- Trabajo inexistente o ajeno devuelve 404 `NOT_FOUND`; sesión inválida devuelve 401. Los trabajos de generación usan sus rutas propias y su vista estudiante; `/api/jobs` no expone el paquete canónico de un quiz.
+- SSE: `event: progress`, `id: <entero>` y `data: {job_id, step, status, iteration}`, terminado por una línea vacía. Heartbeat `: heartbeat` al menos cada 15 s mientras esté activo; `Last-Event-ID` es un entero entre 0 y 2^63−1. El stream entrega eventos posteriores al cursor y cierra al estado terminal. Revalida la sesión y el espacio durante el seguimiento; si se revocan después de enviar headers, emite `event: error` y cierra. Nunca transmite resultados ni tokens por SSE.
 
 ### Chat y glosario (issues `Issue 37`, `Issue 39`, `Issue 38`, `Issue 40`)
 
@@ -390,7 +405,7 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
 - Trabajo y evento inicial se aceptan atómicamente. Un fallo del ejecutor detiene
   nuevas admisiones y marca los pendientes como interrumpidos cuando SQLite está
   disponible; si no lo está, la recuperación ocurre al reiniciar el servicio.
-- Los reintentos del proveedor ocurren en `ctx.llamar`, reservando cuota en cada
+- Los reintentos de Gemini ocurren en `ctx.llamar`, reservando cuota en cada
   intento y respetando cancelación, deadline y Retry-After. Un `ReintentableError`
   fuera de esa llamada falla el trabajo sin repetir el pipeline ni sus efectos.
 - Las lápidas bloquean acceso mientras existan. `purga_despues_en` habilita limpieza,
