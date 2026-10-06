@@ -5,7 +5,7 @@
 > **Hackathon Oracle Next Education (ONE) — Alura Latam**  
 > **Grupo 10 · Equipo 38**  
 > **Sector Empresarial**: EdTech / Capacitación Corporativa / Plataformas de Educación Técnica  
-> **Infraestructura**: Oracle Cloud Infrastructure (OCI) Always Free ($0.00 Costo Garantizado)
+> **Infraestructura**: Oracle Cloud Infrastructure (OCI), exclusivamente recursos Always Free verificados para la cuenta
 
 ---
 
@@ -16,13 +16,13 @@
 ### Mapeo de Formaciones ONE
 - **Formaciones Indispensables**: Inteligencia de Datos y RAG Avanzado + Oracle Cloud Infrastructure (OCI).
 - **Formaciones de Refuerzo**: Ingeniería de Agentes y Automatización con IA + Desarrollo y Orquestación con IA Generativa.
-- **Núcleo Técnico**: Pipeline de RAG (Retrieval-Augmented Generation) con segmentación semántica (*chunking*), embeddings, almacenamiento en Vector Store (ChromaDB / FAISS) y anclaje fáctico garantizado con el algoritmo de fidelidad de Ragas, integrado a OCI Object Storage en la capa Always Free.
+- **Núcleo Técnico**: Pipeline de RAG (Retrieval-Augmented Generation) con segmentación estructural recursiva (*chunking*), embeddings, almacenamiento en ChromaDB y verificación de fidelidad inspirada en Ragas, integrado a OCI Object Storage en la capa Always Free. Los embeddings se usan para indexación y recuperación; no determinan los cortes del documento.
 
 ---
 
 ## 🏗️ Arquitectura del Sistema y Diagrama de Flujo
 
-El sistema sigue un diseño de precisión modelado bajo el estándar de **Archify** con balizas de evidencia enlazadas al código fuente:
+El diagrama representa la arquitectura objetivo, definida en [las decisiones](decisiones_proyecto.md) y [los contratos de API](docs/contratos-api.md); no acredita que todos los componentes estén implementados. El avance se sigue en [el plan](docs/plan-implementacion.md). La segmentación está en [chunker.py](backend/app/core/rag/chunker.py), la evaluación en [faithfulness.py](backend/app/core/faithfulness/faithfulness.py) y la selección del proveedor de almacenamiento en [oci_storage.py](backend/app/storage/oci_storage.py).
 
 ```mermaid
 flowchart TB
@@ -34,7 +34,7 @@ flowchart TB
     end
 
     subgraph RAG ["RAG Pipeline & Grounding"]
-        Parser["Document Parser & Semantic Chunker"]
+        Parser["Document Parser & Structural Chunker<br/>(750 tokens, hasta 120 de solapamiento)"]
         Embedder["Embedding Engine"]
         Chroma[("ChromaDB Vector Store")]
         Retriever["Context Retriever (MMR)"]
@@ -49,13 +49,19 @@ flowchart TB
 
     subgraph VERIFICATION ["Anti-Hallucination Guardrail"]
         RagasFaithfulness["Ragas Faithfulness Evaluator<br/>(Atomic Claims & NLI Entailment)"]
-        Threshold{"Score >= 0.85?"}
+        Quality{"Score >= 0.85 y<br/>todas las verificaciones aprobadas?"}
+        Retry{"Quedan redacciones?<br/>(máximo 3 en total)"}
+        Rejected["rejected_quality<br/>(sin contenido publicable)"]
     end
 
-    subgraph STORAGE ["Storage & Persistence (OCI Always Free $0.00)"]
+    subgraph STORAGE ["Storage & Persistence (modo fijado al iniciar)"]
+        StorageProvider["StorageProvider seleccionado<br/>(sin fallback automático)"]
         OCIClient["OCI Object Storage Client"]
         Bucket[("Bucket: nuevamente-contenidos-educativos")]
-        MockFallback[("Local Storage Fallback (.data/)")]
+        MockStorage[("LocalMockStorageProvider<br/>(.data/oci_mock_storage/)")]
+        Confirmed{"Escritura y verificación<br/>confirmadas?"}
+        Completed["completed<br/>(provider: oci o mock)"]
+        Failed["failed<br/>(diagnóstico técnico, sin contenido)"]
     end
 
     subgraph EXPORT ["Multi-Format Exporters"]
@@ -74,17 +80,28 @@ flowchart TB
     Retriever --> Writer
     Writer --> Critic
     Critic --> RagasFaithfulness
-    RagasFaithfulness --> Threshold
+    RagasFaithfulness --> Quality
+    Critic -- "Fallo técnico / deadline / cuota" --> Failed
+    RagasFaithfulness -- "Fallo del evaluador" --> Failed
+    Quality -- "No: corregir y reevaluar" --> Retry
+    Retry -- "Sí" --> Writer
+    Retry -- "No" --> Rejected
+    Quality -- "Sí: contenido aprobado" --> StorageProvider
 
-    Threshold -- "No (Score < 0.85)<br/>Feedback Loop" --> Writer
-    Threshold -- "Yes (Score >= 0.85)" --> Display
-    Threshold -- "Yes" --> ScoreWidget
-    Threshold -- "Yes" --> OCIClient
-    Threshold -- "Yes" --> ExportRouter
-
+    StorageProvider -- "MOCK_OCI=0" --> OCIClient
+    StorageProvider -- "MOCK_OCI=1 (desarrollo/CI)" --> MockStorage
     OCIClient --> Bucket
-    OCIClient -. "Fallback (offline / sin credenciales)" .-> MockFallback
+    Bucket --> Confirmed
+    MockStorage --> Confirmed
+    StorageProvider -- "Error de almacenamiento" --> Failed
+    Confirmed -- "No" --> Failed
+    Confirmed -- "Sí" --> Completed
+    Completed --> Display
+    Completed --> ScoreWidget
+    Completed --> ExportRouter
 ```
+
+El modo se elige al arrancar, no ante un error de OCI. En desarrollo, `completed` con `provider=mock` confirma almacenamiento local y no acredita escritura en OCI. Los originales también deben persistirse antes de indexarse. Un aprobado cuya escritura falla queda `failed`; reintentar solo persistencia no vuelve a generar contenido.
 
 ---
 
@@ -99,25 +116,34 @@ flowchart TB
 
 ---
 
-## 🛡️ Mecanismo Anti-Alucinación: Ragas Faithfulness (`anclaje_fuente_score`)
+## 🛡️ Verificación de Fidelidad Inspirada en Ragas (`anclaje_fuente_score`)
 
-Para eliminar de raíz las alucinaciones de los LLMs en contextos educativos sensibles:
+Para reducir el riesgo de afirmaciones sin respaldo y conservar evidencia verificable, sin prometer infalibilidad del evaluador:
+
 1. **Descomposición Atómica**: El contenido generado se descompone en proposiciones fácticas atómicas e independientes.
 2. **Inferencia de Lenguaje Natural (NLI)**: Cada afirmación se contrasta contra los fragmentos originales recuperados del documento fuente mediante MMR.
 3. **Métrica Cuantitativa**:
    $$\text{anclaje\_fuente\_score} = \frac{\sum \text{veredictos fácticos válidos}}{\text{total de afirmaciones generadas}}$$
-4. **Umbral de Calidad**:
-   - `0.85 – 1.00`: **Aprobado**. Contenido fáctico verificado, renderizado en UI y persistido en OCI.
-   - `< 0.85`: **Rechazado**. Se activa el ciclo de retroalimentación en LangGraph hacia el agente *Writer*.
+4. **Aprobación Completa**:
+   - `0.85 – 1.00`: **Candidato a aprobación**, sujeto a todas las comprobaciones; el score por sí solo no autoriza publicar.
+   - Toda afirmación falsa o sin respaldo debe corregirse, eliminarse o convertirse en una limitación explícita antes de reevaluar la versión completa. También bloquean las citas inválidas, contradicciones, cobertura incompleta, rúbricas pedagógicas insuficientes o revisión visual insuficiente cuando aplica.
+   - Con el score definido como respaldadas/total, exigir que todas las afirmaciones estén respaldadas implica `1.0` para el contenido final aprobado. El mínimo `0.85` no permite publicar un 15% de errores conocidos.
+   - `< 0.85` o comprobaciones pendientes: revisar si quedan redacciones, con un máximo de tres en total. Agotarlas sin aprobación produce `rejected_quality`, sin contenido descargable.
+   - Una evaluación vacía o incompleta es `no_evaluable`, sin inventar un score. Los fallos técnicos se informan como `failed`, no como rechazos de calidad.
+5. **Publicación y Persistencia**: Solo se entrega el paquete educativo cuando el trabajo está `completed`, tras guardar y verificar el objeto con el proveedor elegido. Una falla de persistencia impide ese estado aunque la evaluación haya aprobado.
+
+Las reglas detalladas están en [decisiones §19](decisiones_proyecto.md#19-mecanismo-anti-alucinación) y [contratos de API](docs/contratos-api.md).
 
 ---
 
-## ☁️ Integración OCI Object Storage Always Free ($0.00 Costo)
+## ☁️ Integración OCI Object Storage Always Free
 
 - **Bucket**: `nuevamente-contenidos-educativos`.
-- **SDK**: `oci-sdk` para Python con `oci.object_storage.ObjectStorageClient`.
-- **Garantía $0.00**: Operación dentro de los límites perpetuos de OCI Always Free (hasta 10 GB de Object Storage estándar y 50,000 peticiones mensuales sin costo).
-- **Fallback Mock Transparente**: Si las credenciales de OCI no están presentes, el sistema activa automáticamente `LocalMockStorageProvider` en `.data/oci_mock_storage/` permitiendo ejecutar, evaluar y probar el sistema localmente sin tarjeta de crédito ni configuración de red.
+- **Proveedor Real Previsto**: SDK `oci` para Python con `oci.object_storage.ObjectStorageClient` (issue #14). La fábrica actual rechaza el modo real hasta implementar ese proveedor; no simula una conexión exitosa.
+- **Control de Costos**: Utilizar exclusivamente recursos Always Free y verificar la asignación efectiva de la cuenta, región y consumo compartido antes de desplegar. No se garantiza costo cero automáticamente por elegir OCI; se aplican los presupuestos y controles definidos en [decisiones §8.4](decisiones_proyecto.md#84-gobernanza-de-costo-cero).
+- **Mock Explícito**: `MOCK_OCI=1`, únicamente en desarrollo, pruebas o CI, selecciona `LocalMockStorageProvider` en `.data/oci_mock_storage/` (bajo `DATA_DIR` si se configura). No se activa por falta de credenciales ni ante fallos del servicio real.
+- **Producción Estricta**: `APP_ENV=production` exige mocks desactivados y configuración real completa. La falta de configuración o proveedor produce un error de arranque accionable. Los errores de OCI se informan y nunca se convierten en éxitos locales.
+- **Evidencia de Persistencia**: La respuesta identifica `persistencia.provider` como `oci` o `mock`; una prueba local no acredita la integración obligatoria con OCI.
 
 ---
 
@@ -139,7 +165,7 @@ Inspirado en la interfaz de Linear (`awesome-design-md`):
    - *Doc*: Manual de integración de Webhooks y APIs de pagos.
    - *Perfil*: Desarrollador Junior / Semi Senior.
    - *Formato*: Guía Práctica Paso a Paso (Tutorial).
-   - *Verificación*: `anclaje_fuente_score >= 0.88`, subida a OCI Object Storage.
+   - *Verificación*: Evaluación completa aprobada y persistencia real confirmada en OCI Object Storage.
 2. **Escenario B — Memorización / E-commerce**:
    - *Doc*: Especificación de checkout con microservicios.
    - *Perfil*: Principiante / Transición de Carrera.
@@ -170,6 +196,9 @@ cd backend && python -c "import app" && cd ..
 
 # 4. Variables de entorno: copiar template y completar placeholders (Apéndice A)
 cp .env.example .env
+# Para desarrollo/pruebas sin servicios externos, configurar explícitamente en .env:
+# APP_ENV=development, MOCK_OCI=1 y MOCK_GEMINI=1.
+# El template es de producción: requiere mocks desactivados y credenciales reales.
 
 # 5. Los mismos chequeos que corre la CI en cada PR (ruff + pytest, ambos desde la raíz)
 ruff check .
@@ -213,7 +242,7 @@ El repositorio cuenta con 13 skills especializadas y armonizadas en `.agents/ski
 5. [`api-and-interface-design`](.agents/skills/api-and-interface-design/SKILL.md): Contratos de datos tipados y fronteras limpias.
 6. [`rag-and-grounding`](.agents/skills/rag-and-grounding/SKILL.md): Ingestión PDF/MD, ChromaDB y algoritmo Ragas de fidelidad.
 7. [`pedagogical-orchestrator`](.agents/skills/pedagogical-orchestrator/SKILL.md): Grafo LangGraph (Supervisor, Researcher, Writer, Critic), 5 formatos y Anki.
-8. [`oci-always-free-storage`](.agents/skills/oci-always-free-storage/SKILL.md): Conector OCI SDK Always Free y fallback mock local.
+8. [`oci-always-free-storage`](.agents/skills/oci-always-free-storage/SKILL.md): Almacenamiento OCI Always Free y mock local explícito para desarrollo/CI, sujeto a las decisiones vigentes.
 9. [`linear-design-system`](.agents/skills/linear-design-system/SKILL.md): Tokens oscuros Linear, cards, gauges y CSS Streamlit.
 10. [`frontend-ui-engineering`](.agents/skills/frontend-ui-engineering/SKILL.md): Accesibilidad WCAG, estados vacíos/carga y ergonomía UX.
 11. [`security-and-hardening`](.agents/skills/security-and-hardening/SKILL.md): Sanitización de inputs, defensas contra prompt injection y secretos.
@@ -223,8 +252,8 @@ El repositorio cuenta con 13 skills especializadas y armonizadas en `.agents/ski
 ---
 
 ## 📋 Reglas de Supremacía Anti-Contradicción
-1. **Fidelidad sobre Fluidez**: El score Ragas (`anclaje_fuente_score >= 0.85`) prevalece sobre cualquier elocuencia estilística.
+1. **Fidelidad sobre Fluidez**: El score mínimo `0.85` selecciona candidatos; la aprobación exige respaldo de todas las afirmaciones y superar las comprobaciones factuales, pedagógicas y visuales aplicables.
 2. **Pydantic es Soberano**: Todo intercambio estructurado de datos debe validarse contra los esquemas oficiales Pydantic v2.
-3. **Costo Cero & Fallback Mock**: Si no hay credenciales OCI, el sistema opera transparente en modo mock local (`.data/oci_mock_storage/`).
+3. **Always Free y Mock Explícito**: Verificar los límites efectivos de OCI. `MOCK_OCI=1` habilita el proveedor local únicamente en desarrollo/CI; producción exige configuración real y nunca degrada automáticamente a mock.
 4. **Cohesión Linear**: La interfaz adopta estrictamente la paleta y estética Linear (`#010102`, `#5e6ad2`).
 5. **Spec-First**: Ningún componente se desarrolla sin especificación y validación de dominio previa.
