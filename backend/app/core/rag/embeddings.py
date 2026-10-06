@@ -109,7 +109,7 @@ def crear_embedder_gemini(api_key: str, modelo: str, dimensiones: int) -> Embedd
         try:
             respuesta = await cliente.aio.models.embed_content(
                 model=modelo,
-                contents=textos,
+                contents=[types.Content(parts=[types.Part(text=t)]) for t in textos],
                 config=types.EmbedContentConfig(output_dimensionality=dimensiones, task_type=tareas[tarea]),
             )
         except errors.APIError as exc:
