@@ -135,7 +135,7 @@ docker run --rm --platform linux/arm64 --entrypoint python nuevamente-backend:ar
 
 Docker Desktop proporciona emulación; en un host Linux x86 hace falta QEMU.
 El workflow `.github/workflows/containers.yml` construye ambas imágenes ARM64,
-las ejecuta bajo QEMU y verifica arquitectura/UID, sin publicar imágenes.
+las ejecuta en runners ARM64 nativos y verifica arquitectura/UID, sin publicar imágenes.
 Otro job levanta Compose con mocks y ejecuta `.github/scripts/smoke_compose.py`.
 
 Para reproducir el smoke en un proyecto **efímero**, sin utilizar tu volumen habitual:
