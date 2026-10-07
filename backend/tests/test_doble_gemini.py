@@ -81,3 +81,13 @@ async def test_similitudes_coherentes(doble_gemini):
     v1a, v1b, v2 = (await doble_gemini.embed(["redes vcn", "redes vcn", "gobernanza de datos"]))[:3]
     assert math.isclose(coseno(v1a, v1b), 1.0, abs_tol=1e-12)
     assert abs(coseno(v1a, v2)) < 0.25  # en dim 768 el coseno de hashes ronda ±0.04
+
+
+async def test_embeddings_sync_y_async_comparten_logica(doble_gemini):
+    async_resultado = await doble_gemini.embed(["texto"])
+
+    sync_resultado = doble_gemini.embed_sync(["texto"], timeout=1)
+
+    assert sync_resultado == async_resultado
+    assert doble_gemini.llamadas_embeddings == 2
+    assert doble_gemini.entradas_embeddings == [["texto"], ["texto"]]

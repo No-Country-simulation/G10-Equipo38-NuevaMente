@@ -54,6 +54,8 @@ class DobleGemini:
         self.llamadas_generacion = 0
         self.llamadas_verificacion = 0
         self.llamadas_embeddings = 0
+        self.entradas_embeddings: list[list[str]] = []
+        self._errores_embeddings: deque[Exception] = deque()
 
     # ------------------------- programación -------------------------
 
@@ -70,6 +72,10 @@ class DobleGemini:
         """Encola el próximo veredicto de `verificar_afirmacion`."""
         self._veredictos.append({"respaldada": respaldada, "razon": razon})
 
+    def programar_error_embeddings(self, *errores: Exception) -> None:
+        """Encola errores para las proximas llamadas de embeddings."""
+        self._errores_embeddings.extend(errores)
+
     def reset(self) -> None:
         """Vuelve al estado inicial (respuestas y contadores en cero)."""
         self._generaciones.clear()
@@ -77,6 +83,8 @@ class DobleGemini:
         self.llamadas_generacion = 0
         self.llamadas_verificacion = 0
         self.llamadas_embeddings = 0
+        self.entradas_embeddings.clear()
+        self._errores_embeddings.clear()
 
     # ------------------------- "API" del doble -------------------------
 
@@ -119,6 +127,14 @@ class DobleGemini:
         return {"respaldada": False, "razon": "doble sin veredicto programado"}
 
     async def embed(self, textos: list[str]) -> list[list[float]]:
+        """Interfaz async existente; comparte logica con embed_sync."""
+        return self._embed(textos)
+
+    def embed_sync(self, textos: list[str], *, timeout: float = 60.0) -> list[list[float]]:
+        """Interfaz sync para integrarse con ContextoEjecucion.llamar."""
+        return self._embed(textos)
+
+    def _embed(self, textos: list[str]) -> list[list[float]]:
         """Embeddings deterministas derivados del SHA-256 de cada texto.
 
         Construcción: para la componente i se hashea "<texto>:<i>", se toma
@@ -130,8 +146,12 @@ class DobleGemini:
         - la norma unitaria es lo que ChromaDB espera por defecto.
         """
         self.llamadas_embeddings += 1
-        vectores = [self._vector_de(texto) for texto in textos]
-        return vectores
+        self.entradas_embeddings.append(list(textos))
+
+        if self._errores_embeddings:
+            raise self._errores_embeddings.popleft()
+
+        return [self._vector_de(texto) for texto in textos]
 
     # ------------------------- internals -------------------------
 
