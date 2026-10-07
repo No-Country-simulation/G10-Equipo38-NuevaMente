@@ -1,6 +1,3 @@
-# Compose preliminar (issue #01) — esquema conceptual de decisiones_proyecto.md §14.1.
-# El endurecimiento definitivo (usuario no-root, digest ARM64, healthchecks) llega con el issue #26.
-# Solo backend monta el volumen de datos; el frontend habla con backend por la red interna de Compose.
 services:
   backend:
     build: ./backend
@@ -10,8 +7,23 @@ services:
       - backend_data:/app/.data
       - ./documents:/app/documents:ro
     env_file:
-      - .env
+      - ${NUEVAMENTE_ENV_FILE:-.env}
+    environment:
+      DATA_DIR: /app/.data
+    networks: [aplicacion]
     restart: unless-stopped
+    stop_grace_period: 70s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; r = urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3); assert r.status == 200 and json.load(r)['status'] == 'ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
 
   frontend:
     build: ./frontend
@@ -19,9 +31,30 @@ services:
       - "127.0.0.1:8501:8501"
     environment:
       API_URL: http://backend:8000
+      API_HEALTH_WAIT_SECONDS: "60"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    networks: [aplicacion]
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; r = urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3); assert r.status == 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+networks:
+  aplicacion:
+    driver: bridge
+    # Comunicación por nombre de servicio y salida para Gemini/OCI.
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
 
 volumes:
   backend_data:
