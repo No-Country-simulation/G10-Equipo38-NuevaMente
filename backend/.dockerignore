@@ -1,0 +1,16 @@
+# Contexto limitado al código y sus dependencias; ningún archivo local/secretos.
+**
+!Dockerfile
+!requirements.txt
+!app/
+!app/**
+**/__pycache__/
+**/*.py[cod]
+**/.env*
+**/*.pem
+**/*.key
+**/secrets.toml
+**/.data/
+**/uploads/
+**/*.db*
+**/*.sqlite*

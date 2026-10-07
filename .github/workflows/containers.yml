@@ -1,0 +1,75 @@
+name: Contenedores
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "docker-compose.yml"
+      - ".env.docker.example"
+      - ".github/workflows/containers.yml"
+      - ".github/scripts/smoke_compose.py"
+  push:
+    branches: [develop, main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "docker-compose.yml"
+      - ".env.docker.example"
+      - ".github/workflows/containers.yml"
+      - ".github/scripts/smoke_compose.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contenedores-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64:
+    name: ARM64 / ${{ matrix.servicio }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        servicio: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - name: Construir y cargar imagen ARM64 (sin publicar)
+        run: docker buildx build --platform linux/arm64 --load --tag nuevamente-${{ matrix.servicio }}:arm64 ./${{ matrix.servicio }}
+      - name: Verificar arquitectura y usuario de la imagen
+        run: |
+          test "$(docker image inspect nuevamente-${{ matrix.servicio }}:arm64 --format '{{.Architecture}}')" = arm64
+          docker run --rm --platform linux/arm64 --entrypoint python nuevamente-${{ matrix.servicio }}:arm64 -c "import os, platform; assert platform.machine() == 'aarch64'; assert os.getuid() == 10001; print(platform.machine(), os.getuid())"
+          if [ "${{ matrix.servicio }}" = backend ]; then
+            docker run --rm --platform linux/arm64 --entrypoint python nuevamente-backend:arm64 -c "from app.core.rag.tokenizer import TokenizadorBPE; from app.core.rag.embeddings import GeminiEmbeddings; assert TokenizadorBPE().contar('red privada') > 0"
+          else
+            docker run --rm --platform linux/arm64 --entrypoint python nuevamente-frontend:arm64 -c "import streamlit; print(streamlit.__version__)"
+          fi
+
+  compose:
+    name: Compose / arranque y persistencia
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NUEVAMENTE_ENV_FILE: .env.docker.example
+      COMPOSE_PROJECT_NAME: nuevamente-ci
+    steps:
+      - uses: actions/checkout@v5
+      - name: Construir y arrancar los servicios con mocks explícitos
+        run: docker compose up --build --detach --wait --wait-timeout 120
+      - name: Verificar API, UI, aislamiento y persistencia tras recreación
+        run: python .github/scripts/smoke_compose.py
+      - name: Diagnóstico si falla
+        if: failure()
+        run: docker compose logs --tail 100
+      - name: Detener servicios y borrar solo el volumen efímero de CI
+        if: always()
+        run: docker compose down --volumes
