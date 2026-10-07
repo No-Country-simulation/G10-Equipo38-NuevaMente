@@ -13,6 +13,7 @@ from google.genai import types
 from google.genai.errors import APIError, ClientError, ServerError
 
 from app.config import Configuracion
+from app.core.rag.tokenizer import TokenizadorBPE
 from app.jobs.manager import ContextoEjecucion, CuotaAgotadaError, ReintentableError
 
 
@@ -165,7 +166,10 @@ class GeminiEmbeddings:
             preparado = self._preparar_documento(texto)
 
             resultado = contexto.llamar(
-                lambda timeout: self.proveedor.embed_sync([preparado], timeout=timeout), modelo=self.modelo
+                lambda timeout: self.proveedor.embed_sync([preparado], timeout=timeout),
+                modelo=self.modelo,
+                # Estimación local para TPM, incluidos los prefijos; no es facturación de Gemini.
+                tokens_estimados=TokenizadorBPE().contar(preparado),
             )
             vectores.append(self._extraer_vector(resultado))
 
@@ -174,7 +178,9 @@ class GeminiEmbeddings:
     def embed_query(self, texto: str, *, contexto: ContextoEjecucion) -> list[float]:
         preparado = self._preparar_query(texto)
         resultado = contexto.llamar(
-            lambda timeout: self.proveedor.embed_sync([preparado], timeout=timeout), modelo=self.modelo
+            lambda timeout: self.proveedor.embed_sync([preparado], timeout=timeout),
+            modelo=self.modelo,
+            tokens_estimados=TokenizadorBPE().contar(preparado),
         )
 
         return self._extraer_vector(resultado)
@@ -189,6 +195,12 @@ class GeminiEmbeddings:
             raise ValueError(
                 f"Gemini devolvio un embedding de {len(vector)} dimensiones; se esperaban {self.dimensiones}."
             )
+
+        if any(
+            isinstance(valor, bool) or not isinstance(valor, (int, float)) or not math.isfinite(valor)
+            for valor in vector
+        ):
+            raise ValueError("Gemini devolvio un embedding con valores no numericos o no finitos.")
 
         return vector
 

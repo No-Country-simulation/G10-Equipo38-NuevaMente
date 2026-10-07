@@ -9,6 +9,7 @@ import httpx
 import pytest
 from app.config import Configuracion
 from app.core.rag.embeddings import GeminiEmbeddings, GoogleGenAIEmbeddingProvider, crear_cliente_embeddings
+from app.core.rag.tokenizer import TokenizadorBPE
 from app.jobs.manager import ContextoEjecucion, CuotaAgotadaError, CuotasModelo, CuotasProveedor, ReintentableError
 from doubles.gemini import DobleGemini
 from google.genai.errors import ClientError, ServerError
@@ -649,3 +650,57 @@ def test_embed_documents_propaga_timeout_del_contexto():
     cliente.embed_documents(["texto"], contexto=contexto)
 
     assert timeouts_recibidos == [2.5]
+
+
+@pytest.mark.parametrize("operacion", ["documento", "query"])
+def test_embeddings_reservan_tokens_de_la_entrada_preparada(operacion, doble_gemini, contexto_embeddings, monkeypatch):
+    reservas = []
+    permitir = contexto_embeddings.cuotas.permitir
+
+    def registrar(modelo, tokens_estimados=0):
+        reservas.append((modelo, tokens_estimados))
+        permitir(modelo, tokens_estimados)
+
+    monkeypatch.setattr(contexto_embeddings.cuotas, "permitir", registrar)
+    doble_gemini.programar_error_embeddings(ReintentableError("temporal", retry_after=0))
+    cliente = GeminiEmbeddings(proveedor=doble_gemini, modelo="gemini-embedding-2", dimensiones=768)
+    if operacion == "documento":
+        cliente.embed_documents(["Una VCN conecta recursos."], contexto=contexto_embeddings)
+    else:
+        cliente.embed_query("¿Qué conecta la VCN?", contexto=contexto_embeddings)
+    preparado = doble_gemini.entradas_embeddings[-1][0]
+    estimados = TokenizadorBPE().contar(preparado)
+    assert estimados > 0
+    # También el reintento reserva TPM, en el mismo contador central.
+    assert reservas == [("gemini-embedding-2", estimados)] * 2
+
+
+@pytest.mark.parametrize("operacion", ["documento", "query"])
+def test_embeddings_respetan_tpm_antes_de_llamar_al_proveedor(operacion, doble_gemini, contexto_embeddings):
+    contexto_embeddings.cuotas = CuotasProveedor({"gemini-embedding-2": CuotasModelo(tpm=1)})
+    cliente = GeminiEmbeddings(proveedor=doble_gemini, modelo="gemini-embedding-2", dimensiones=768)
+    with pytest.raises(CuotaAgotadaError, match="TPM"):
+        if operacion == "documento":
+            cliente.embed_documents(["texto"], contexto=contexto_embeddings)
+        else:
+            cliente.embed_query("texto", contexto=contexto_embeddings)
+    assert doble_gemini.llamadas_embeddings == 0
+
+
+@pytest.mark.parametrize("valor", [float("nan"), float("inf"), float("-inf"), "0.1", None, True])
+@pytest.mark.parametrize("operacion", ["documento", "query"])
+def test_embeddings_rechazan_valores_invalidos_sin_reintentar(valor, operacion, contexto_embeddings):
+    llamadas = []
+
+    class ProveedorInvalido:
+        def embed_sync(self, textos, *, timeout):
+            llamadas.append(textos)
+            return [[valor] + [0.0] * 767]
+
+    cliente = GeminiEmbeddings(proveedor=ProveedorInvalido(), modelo="gemini-embedding-2", dimensiones=768)
+    with pytest.raises(ValueError, match="no numericos o no finitos"):
+        if operacion == "documento":
+            cliente.embed_documents(["texto"], contexto=contexto_embeddings)
+        else:
+            cliente.embed_query("texto", contexto=contexto_embeddings)
+    assert len(llamadas) == 1
