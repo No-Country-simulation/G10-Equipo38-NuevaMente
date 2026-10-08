@@ -28,3 +28,6 @@ google-genai==2.28.0
 
 # Proveedor Object Storage real (issue #14); retries controlados por la aplicación.
 oci==2.187.2
+
+# Índice vectorial persistente local; wheels Windows y Linux ARM64 verificados (#17).
+chromadb==1.5.9

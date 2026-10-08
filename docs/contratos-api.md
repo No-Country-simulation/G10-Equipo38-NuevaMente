@@ -184,6 +184,53 @@ Listado paginado con filtros: `documento`, `perfil`, `formato`, `idioma`, `desde
   limpia; `--create-bucket` permite provisionamiento manual explícito, con permisos
   separados. Tests SDK/HTTP simulados no acreditan una tenancy real ni Gemini.
 
+### Índice vectorial local (Issue 17)
+
+- `core/rag/vectorstore.py`: `VectorStoreChroma(Path(config.data_dir) / "chroma", embeddings)`
+  usa Chroma embebido persistente, sin servidor externo ni modelo descargado. `embeddings`
+  es el `GeminiEmbeddings` de Issue 13. El backend monta `DATA_DIR=/app/.data` en
+  `backend_data`; el índice y su catálogo SQLite WAL son datos derivados.
+- `indexar`, `buscar`, `contar` y `borrar` reciben `workspace_id`, `document_id` y
+  `contexto=ctx`. El espacio sale de la sesión y debe coincidir con el contexto;
+  el consumidor valida ownership/estado del documento en el registro operativo.
+  Todas las lecturas, búsquedas y eliminaciones de chunks filtran **ambos IDs**;
+  no existe una consulta global ni filtros libres. `buscar` devuelve chunk completo,
+  distancia coseno y vector para el MMR de Issue 18. Su similitud no es un score de fidelidad.
+- Colecciones `embeddings-{modelo}-{dimensiones}` y
+  `demo-embeddings-{modelo}-{dimensiones}` con preparación y schema verificados.
+  `buscar_demo` resuelve el espacio lógico público `biblioteca-demo` y filtra además
+  el documento; el contexto del usuario sigue vigente y consume sus cuotas compartidas.
+  Solo `reconstruir_demo`, con contexto de mantenimiento de ese espacio reservado,
+  escribe la demo. No se expone una ruta pública de escritura.
+- Se generan embeddings síncronos por chunk a través de `ctx.llamar`. Chroma recibe
+  lotes de hasta 64 registros, acotados además por su límite nativo. Un intento tiene
+  un UUID; SQLite publica su versión solo después de confirmar todos sus chunks.
+  Fallos/cancelación no hacen visible un índice parcial. Reindexar el mismo contenido
+  reutiliza vectores únicamente dentro del mismo espacio/modelo/preparación; los nuevos
+  IDs y citas se conservan. Borrar confirma primero una lápida local y elimina chunks
+  de todas las colecciones privadas de modelos/dimensiones de ese espacio/documento.
+- `core/rag/rebuild.py` reconstruye desde `StorageProvider`, sin crear SDKs ni añadir
+  retries: `reconstruir_workspace` pagina los documentos; `reconstruir_indice` recorre
+  contextos autorizados en serie y opcionalmente la demo. Los contextos comparten cuotas
+  y deadline del worker. Se verifica vigencia del workspace, SHA-256 del original y ETag
+  del manifiesto antes de publicar. Las fallas OCI/Gemini se propagan como fallas técnicas.
+- **Contrato interno para la ingesta Issue 19:** guardar primero el original en
+  `source_documents/{workspace_id}/{document_id}/original` y su `ManifiestoDocumento`
+  v1 en `.../manifest.json`: `workspace_id`, `document_id`, `source_name`, `hash_sha256`,
+  `language`, `estado`, `borrado`, `parser` y `chunker`. Los valores por defecto de
+  idioma/configuración están en el modelo y deben serializarse mediante `model_dump_json()`.
+  Demo usa `demo/{document_id}/original` y `demo/{document_id}/manifest.json` con espacio
+  lógico `biblioteca-demo`. El nombre es una etiqueta, nunca una ruta local.
+- Antes de limpiar físicamente una fuente, Issue 19 debe confirmar `borrado=true` en
+  su manifiesto OCI y la lápida operativa. Un original remanente no autoriza recuperarlo.
+  La reconstrucción omite lápidas locales/manifiestos borrados y retira índices de
+  documentos sin manifiesto. No restaura sesiones ni garantiza continuidad del SQLite
+  operativo tras perder la VM. PDFs con visión necesaria permanecen `processing`, incluso
+  si el manifiesto anterior decía `ready`; Issue 30 reconstruye sus interpretaciones.
+- Verificación local: `pytest backend/tests/test_vectorstore.py` usa Chroma nativo
+  persistente y dobles explícitos de OCI/Gemini. No acredita servicios reales ni una
+  ingesta HTTP completa, que corresponde a Issue 19.
+
 ### Trabajos comunes (Issue 20)
 
 GET /api/jobs/{id}, GET /api/jobs/{id}/events y POST /api/jobs/{id}/cancel permiten consultar, seguir y cancelar ingestión/chat/glosario.
