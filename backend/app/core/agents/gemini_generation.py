@@ -102,12 +102,57 @@ class ClienteGeminiGeneracion:
         timeout: float,
         max_output_tokens: int,
     ) -> str:
+        return self._solicitar_sync(
+            prompt,
+            modelo=modelo,
+            system_instruction=system_instruction,
+            response_json_schema=response_json_schema,
+            timeout=timeout,
+            max_output_tokens=max_output_tokens,
+        )
+
+    # Mismo transporte, cuotas/retries externos y modelo propio del consumidor.
+    verificar_sync = generar_sync
+
+    def verificar_visual_sync(
+        self,
+        prompt: str,
+        *,
+        imagen_original: bytes,
+        mime_type: str,
+        modelo: str,
+        system_instruction: str,
+        response_json_schema: dict,
+        timeout: float,
+        max_output_tokens: int,
+    ) -> str:
+        if not imagen_original or mime_type not in ("image/png", "image/jpeg", "image/webp"):
+            raise ValueError("La revisión visual requiere una imagen original y MIME soportado")
+        return self._solicitar_sync(
+            [types.Part.from_text(text=prompt), types.Part.from_bytes(data=imagen_original, mime_type=mime_type)],
+            modelo=modelo,
+            system_instruction=system_instruction,
+            response_json_schema=response_json_schema,
+            timeout=timeout,
+            max_output_tokens=max_output_tokens,
+        )
+
+    def _solicitar_sync(
+        self,
+        contents: str | list[types.Part],
+        *,
+        modelo: str,
+        system_instruction: str,
+        response_json_schema: dict,
+        timeout: float,
+        max_output_tokens: int,
+    ) -> str:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout debe ser positivo y finito")
         try:
             respuesta = self._cliente.models.generate_content(
                 model=modelo,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     candidate_count=1,
                     system_instruction=system_instruction,

@@ -49,6 +49,8 @@ class DobleGemini:
         self.dimension_embeddings = dimension_embeddings
         self._generaciones: deque[str | Exception] = deque()
         self._veredictos: deque[dict] = deque()
+        self._revisiones: deque[str | Exception] = deque()
+        self.entradas_verificacion: list[dict] = []
         # Contadores de uso: permiten que un test afirme CUÁNTAS llamadas
         # consumió (el presupuesto de §7.5 se prueba contando, no adivinando).
         self.llamadas_generacion = 0
@@ -72,6 +74,10 @@ class DobleGemini:
         """Encola el próximo veredicto de `verificar_afirmacion`."""
         self._veredictos.append({"respaldada": respaldada, "razon": razon})
 
+    def programar_revision(self, *respuestas: str | Exception) -> None:
+        """JSON del juez textual/visual; nunca aprueba sin respuesta programada."""
+        self._revisiones.extend(respuestas)
+
     def programar_error_embeddings(self, *errores: Exception) -> None:
         """Encola errores para las proximas llamadas de embeddings."""
         self._errores_embeddings.extend(errores)
@@ -80,6 +86,8 @@ class DobleGemini:
         """Vuelve al estado inicial (respuestas y contadores en cero)."""
         self._generaciones.clear()
         self._veredictos.clear()
+        self._revisiones.clear()
+        self.entradas_verificacion.clear()
         self.llamadas_generacion = 0
         self.llamadas_verificacion = 0
         self.llamadas_embeddings = 0
@@ -119,12 +127,70 @@ class DobleGemini:
         La forma imita la salida estructurada que el verificador de
         fidelidad (issue #24) le pedirá al modelo real.
         """
+        return self._verificar_afirmacion()
+
+    def verificar_afirmacion_sync(self, afirmacion: str, evidencia: str, *, timeout: float = 60.0) -> dict:
+        return self._verificar_afirmacion()
+
+    def _verificar_afirmacion(self) -> dict:
         self.llamadas_verificacion += 1
         if self._veredictos:
             return dict(self._veredictos.popleft())
         # Sin veredicto programado: conservador. No respaldar por defecto
         # obliga a los tests a declarar lo que esperan.
         return {"respaldada": False, "razon": "doble sin veredicto programado"}
+
+    def verificar_sync(
+        self,
+        prompt: str,
+        *,
+        modelo: str,
+        system_instruction: str,
+        response_json_schema: dict,
+        timeout: float,
+        max_output_tokens: int,
+    ) -> str:
+        return self._revisar(
+            prompt=prompt,
+            modelo=modelo,
+            system_instruction=system_instruction,
+            response_json_schema=response_json_schema,
+            timeout=timeout,
+            max_output_tokens=max_output_tokens,
+        )
+
+    def verificar_visual_sync(
+        self,
+        prompt: str,
+        *,
+        imagen_original: bytes,
+        mime_type: str,
+        modelo: str,
+        system_instruction: str,
+        response_json_schema: dict,
+        timeout: float,
+        max_output_tokens: int,
+    ) -> str:
+        return self._revisar(
+            prompt=prompt,
+            imagen_original=imagen_original,
+            mime_type=mime_type,
+            modelo=modelo,
+            system_instruction=system_instruction,
+            response_json_schema=response_json_schema,
+            timeout=timeout,
+            max_output_tokens=max_output_tokens,
+        )
+
+    def _revisar(self, **entrada) -> str:
+        self.llamadas_verificacion += 1
+        self.entradas_verificacion.append(entrada)
+        if self._revisiones:
+            respuesta = self._revisiones.popleft()
+            if isinstance(respuesta, Exception):
+                raise respuesta
+            return respuesta
+        return "[doble-gemini: revisión no programada]"
 
     async def embed(self, textos: list[str]) -> list[list[float]]:
         """Interfaz async existente; comparte logica con embed_sync."""

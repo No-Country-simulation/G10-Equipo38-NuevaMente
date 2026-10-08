@@ -93,7 +93,7 @@ graph TD
 - [ ] Doble que falla como juez → trabajo `failed` con causa técnica, sin score.
 - [ ] Quiz: distractores comprobados por separado (una sola respuesta defendible; explicación refuta errores).
 
-**Verificación**: `pytest backend/tests/test_critic.py` con dobles que cubren las tres bandas de score + fallo de juez.
+**Verificación**: `pytest backend/tests/test_critic.py` con dobles: tres bandas, falsedad con score alto, evaluación incompleta, rúbrica, quiz, imagen original, cancelación/deadline y cuota/presupuesto por retry. Contrato interno y límites de integración: `docs/contratos-api.md`, sección «Critic (Issue 28)». No acredita Gemini/OCI reales; las aristas y el loader documental se conectan en issues 29/30.
 
 ---
 
