@@ -1,60 +1,121 @@
 import streamlit as st
-from i18n import CATALOGOS, IDIOMA_POR_DEFECTO, t
+from api_client import APIError
+from components.session import manejar_sesion_invalida
+from components.sidebar import render_sidebar
+from i18n import t
 
 
-def render():
-    # Inicializar el idioma en session_state si no existe
-    if "idioma_ui" not in st.session_state:
-        st.session_state.idioma_ui = IDIOMA_POR_DEFECTO
+def mostrar_error_ui(e: APIError, idioma_actual: str):
+    """Renderiza errores amigables y reacciona ante sesiones inválidas/expiradas."""
+    if e.code == "SESSION_INVALID" and not st.session_state.mostrando_recuperacion:
+        manejar_sesion_invalida()
+        st.rerun()
+        return
 
-    idioma_actual = st.session_state.idioma_ui
+    titulo = t("errors.titulo", idioma_actual)
+    clave_error = f"errors.{e.code}"
+    mensaje = t(clave_error, idioma_actual)
 
-    # --- SIDEBAR (Barra lateral) ---
-    with st.sidebar:
-        st.title(t("comun.app_nombre", idioma_actual))
+    # Si la clave no existe en el catálogo, usa el mensaje de error interno
+    if mensaje == clave_error:
+        mensaje = t("errors.INTERNAL", idioma_actual)
 
-        # Selector de idioma de UI
-        nuevo_idioma = st.selectbox(
-            t("sidebar.idioma_ui", idioma_actual),
-            options=CATALOGOS.keys(),
-            index=list(CATALOGOS.keys()).index(idioma_actual),
-            format_func=lambda x: t(f"idioma.{x}", idioma_actual),
+    st.error(f"**{titulo}**: {mensaje}")
+
+    with st.expander(t("comun.detalles_tecnicos", idioma_actual)):
+        st.code(f"Code: {e.code}\nRequest-ID: {e.request_id or 'N/A'}")
+
+
+def render(api_client, idioma_actual: str):
+    # Renderizar panel lateral con controles
+    render_sidebar(api_client, idioma_actual)
+    # --- Banner del código de recuperación
+    _render_banner_recuperacion(idioma_actual)
+    if st.session_state.get("mostrando_recuperacion"):
+        _render_pantalla_recuperacion(api_client, idioma_actual)
+    else:
+        _render_pantalla_onboarding(idioma_actual)
+
+
+def _render_banner_recuperacion(idioma_actual: str):
+    """Muestra el aviso amarillo del código de recuperación (solo emisión única)."""
+    if not st.session_state.recovery_code or st.session_state.mostrando_recuperacion:
+        return
+
+    st.warning(
+        f"⚠️ **{t('onboarding.codigo_titulo', idioma_actual)}**: {t('onboarding.codigo_advertencia', idioma_actual)}"
+    )
+    st.caption(t("onboarding.codigo_descripcion", idioma_actual))
+
+    col_code, col_btn = st.columns([3, 1])
+    with col_code:
+        st.code(st.session_state.recovery_code)
+    with col_btn:
+        st.download_button(
+            label=t("onboarding.descargar_nota", idioma_actual),
+            data=(
+                f"{t('onboarding.codigo_titulo', idioma_actual)}:\n"
+                f"{st.session_state.recovery_code}\n"
+                f"Workspace ID: {st.session_state.workspace_id}"
+            ),
+            file_name="nuevamente_codigo_recuperacion.txt",
+            mime="text/plain",
         )
 
-        # Actualizar idioma si el usuario lo cambia
-        if nuevo_idioma != idioma_actual:
-            st.session_state.idioma_ui = nuevo_idioma
-            # Recarga la interfaz en caliente para aplicar traducciones
-            st.rerun()
 
-        st.divider()
-        st.markdown(f"### {t('sidebar.titulo', idioma_actual)}")
-        st.markdown(f"### {t('upload.titulo', idioma_actual)}")
+def _render_pantalla_recuperacion(api_client, idioma_actual: str):
+    """Renderiza el formulario para ingresar el código de recuperación."""
 
-        # Expander para el historial
-        with st.expander(t("nav.historial", idioma_actual)):
-            st.write(t("historial.vacio", idioma_actual))
+    # Mostrar advertencia amigable si el usuario fue redirigido por token revocado/expirado
+    if st.session_state.error_sesion_invalida:
+        st.warning(f"⚠️ {t('errors.SESSION_INVALID', idioma_actual)}")
 
-    # --- ÁREA PRINCIPAL (Estado Vacío / Onboarding) ---
+    st.subheader(t("onboarding.recuperar_titulo", idioma_actual))
+    st.caption(t("onboarding.recuperar_ayuda", idioma_actual))
+
+    with st.form("form_recuperacion"):
+        codigo_input = st.text_input(
+            label=t("onboarding.recuperar_titulo", idioma_actual),
+            placeholder="xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx",
+        )
+        btn_submit = st.form_submit_button(t("onboarding.recuperar_boton", idioma_actual))
+
+        if btn_submit:
+            try:
+                res = api_client.recover_session(codigo_input.strip())
+                st.session_state.session_token = res["token"]
+                st.session_state.workspace_id = res["workspace_id"]
+                st.session_state.recovery_code = None
+                st.session_state.mostrando_recuperacion = False
+                st.session_state.error_sesion_invalida = False
+                st.success(t("upload.listo", idioma_actual))
+                st.rerun()
+            except APIError as e:
+                mostrar_error_ui(e, idioma_actual)
+
+    if st.button(t("comun.atras", idioma_actual)):
+        st.session_state.mostrando_recuperacion = False
+        st.session_state.error_sesion_invalida = False
+        st.rerun()
+
+
+def _render_pantalla_onboarding(idioma_actual: str):
+    """Renderiza las 4 acciones principales de la pantalla de bienvenida."""
     st.header(t("onboarding.bienvenida_titulo", idioma_actual))
     st.write(t("onboarding.bienvenida_descripcion", idioma_actual))
 
-    # 4 botones nativos de Streamlit para el onboarding
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        # Cargar un documento
         if st.button(t("upload.titulo", idioma_actual), use_container_width=True):
             pass
     with col2:
-        # Pegar texto
         if st.button(t("upload.enviar_texto", idioma_actual), use_container_width=True):
             pass
     with col3:
-        # Crear espacio (Demo)
         if st.button(t("onboarding.demo", idioma_actual), use_container_width=True):
             pass
     with col4:
-        # Recuperar espacio
         if st.button(t("onboarding.recuperar_titulo", idioma_actual), use_container_width=True):
-            pass
+            st.session_state.mostrando_recuperacion = True
+            st.rerun()

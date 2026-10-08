@@ -43,6 +43,7 @@ CATALOGO_ES: dict[str, str] = {
     "comun.atras": "Atrás",
     "comun.siguiente": "Siguiente",
     "comun.vacio": "Todavía no hay nada por acá.",
+    "comun.detalles_tecnicos": "Detalles técnicos",
     # ------------------------- navegación -------------------------
     "nav.inicio": "Inicio",
     "nav.documentos": "Documentos",
@@ -64,6 +65,10 @@ CATALOGO_ES: dict[str, str] = {
     "onboarding.recuperar_ayuda": "Pegá el código que guardaste al crear el espacio.",
     "onboarding.recuperar_boton": "Entrar con mi código",
     "onboarding.demo": "Probar documento demo",
+    "onboarding.rotar_codigo": "Rotar código de recuperación",
+    "onboarding.rotar_confirmacion": "Esta acción revocará todas las sesiones activas, generará una nueva sesión y emitirá un nuevo código de recuperación. El código anterior dejará de funcionar. ¿Deseás continuar?",
+    "onboarding.borrar_espacio": "Borrar espacio de trabajo",
+    "onboarding.borrar_confirmacion": "Esta acción es irreversible. Se van a borrar todos los documentos y materiales de este espacio.",
     # ------------------------- sidebar -------------------------
     "sidebar.titulo": "Parámetros de adaptación",
     "sidebar.documento": "Documento fuente",
@@ -79,6 +84,7 @@ CATALOGO_ES: dict[str, str] = {
     "sidebar.generar": "Generar material",
     "sidebar.generando": "Generando…",
     "sidebar.idioma_ui": "Idioma de la interfaz",
+    "sidebar.cerrar_sesion": "Cerrar sesión",
     # ------------------------- upload -------------------------
     "upload.titulo": "Cargar un documento",
     "upload.arrastrar": "Arrastrá acá un PDF, Markdown o TXT",
@@ -203,6 +209,7 @@ CATALOGO_ES: dict[str, str] = {
     "errors.INTERNAL": "Error interno. Si persiste, reportá el identificador de la solicitud.",
     "errors.STORAGE_UNAVAILABLE": "El almacenamiento no está disponible ahora.",
     "errors.PROVIDER_UNAVAILABLE": "El proveedor de IA no está disponible ahora.",
+    "errors.SERVICE_UNAVAILABLE": "El servidor no está disponible en este momento. Verificá tu conexión o reintentá más tarde.",
     # ------------------------- accesibilidad -------------------------
     "a11y.ir_al_contenido": "Ir al contenido principal",
     "a11y.indicador_carga": "Cargando contenido, aguardá un momento",
