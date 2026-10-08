@@ -49,7 +49,7 @@ jobs:
           if [ "${{ matrix.servicio }}" = backend ]; then
             docker run --rm --platform linux/arm64 --entrypoint python nuevamente-backend:arm64 -c "from app.core.rag.tokenizer import TokenizadorBPE; from app.core.rag.embeddings import GeminiEmbeddings; assert TokenizadorBPE().contar('red privada') > 0"
             docker run --rm --platform linux/arm64 --entrypoint python \
-              -e APP_ENV=ci -e MOCK_GEMINI=1 -e MOCK_OCI=1 \
+              -e APP_ENV=ci -e MOCK_GEMINI=1 -e MOCK_OCI=1 -e PYTHONPATH=/app \
               --mount "type=bind,source=${{ github.workspace }}/.github/scripts/smoke_chroma.py,target=/tmp/smoke_chroma.py,readonly" \
               nuevamente-backend:arm64 /tmp/smoke_chroma.py
           else
