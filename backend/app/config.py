@@ -138,8 +138,6 @@ class Configuracion(BaseSettings):
 
     @model_validator(mode="after")
     def _reglas_de_entorno(self) -> "Configuracion":
-        if self.retrieval_fetch_k < self.retrieval_k:
-            raise ValueError("RETRIEVAL_FETCH_K debe ser mayor o igual que RETRIEVAL_K")
         """Regla 1: los mocks son de desarrollo/CI/test, jamás de producción.
 
         §8.2: "MOCK_OCI=1 habilita almacenamiento local únicamente en
@@ -147,6 +145,8 @@ class Configuracion(BaseSettings):
         sigue sería mentira (persistencia "completada" que no tocó OCI),
         así que se rechaza en el arranque con mensaje accionable.
         """
+        if self.retrieval_fetch_k < self.retrieval_k:
+            raise ValueError("RETRIEVAL_FETCH_K debe ser mayor o igual que RETRIEVAL_K")
         if self.app_env == "production":
             if self.mock_oci or self.mock_gemini:
                 raise ValueError(
