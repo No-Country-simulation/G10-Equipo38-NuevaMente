@@ -333,6 +333,34 @@ class VectorStoreChroma:
                     where=_filtro(workspace_id, document_id)
                 )
 
+    def listar_chunks(
+        self,
+        workspace_id: str,
+        document_id: str,
+        *,
+        contexto: ContextoEjecucion,
+        source_hash: str,
+    ) -> list[Chunk]:
+        """Inventario de la versión privada autorizada; no consulta Gemini."""
+        self._autorizar(workspace_id, document_id, contexto)
+        activo = self._activo(self._privada, workspace_id, document_id)
+        if activo is None:
+            return []
+        if activo["hash"] != source_hash:
+            raise IndiceInconsistenteError("El índice no corresponde a la fuente autorizada")
+        datos = self._datos(self._privada, activo)
+        chunks = [Chunk.model_validate_json(m["chunk"]) for m in sorted(datos["metadatas"], key=lambda m: m["orden"])]
+        if any(
+            (c.workspace_id, c.document_id, c.document_hash) != (workspace_id, document_id, source_hash) for c in chunks
+        ):
+            raise IndiceInconsistenteError("El inventario contiene chunks ajenos o de otra versión")
+        validar_secciones_heredadas(chunks)
+        contexto.chequear()
+        actual = self._activo(self._privada, workspace_id, document_id)
+        if actual is None or actual["version"] != activo["version"]:
+            raise IndiceInconsistenteError("El índice cambió durante la lectura de secciones")
+        return chunks
+
     def buscar(
         self,
         workspace_id: str,
