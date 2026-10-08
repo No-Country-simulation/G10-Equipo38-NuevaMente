@@ -1,2 +1,3 @@
 # Preserve the official vocabulary bytes and its SHA-256 on every platform.
 backend/app/core/rag/assets/*.tiktoken -text
+infra/oci/*.sh text eol=lf

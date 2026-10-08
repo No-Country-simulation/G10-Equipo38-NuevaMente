@@ -138,5 +138,10 @@ jobs:
       # de import agregar; el smoke test de backend/tests garantiza que
       # siempre haya al menos un test (pytest devuelve exit 5 si no halla
       # ninguno, y eso rompería la CI).
+      - name: Sintaxis de scripts OCI (issue 47)
+        run: |
+          bash -n infra/oci/bootstrap.sh
+          bash -n infra/oci/verify_host.sh
+
       - name: Tests (pytest desde la raíz)
         run: pytest
