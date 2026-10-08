@@ -85,6 +85,10 @@ class Configuracion(BaseSettings):
     gemini_embedding_model: str = "gemini-embedding-2"
     embedding_dimensions: int = Field(default=768, gt=0)
     generation_max_output_tokens: int = Field(default=8192, gt=0)
+    retrieval_k: int = Field(default=5, ge=1, le=100)
+    retrieval_fetch_k: int = Field(default=15, ge=1, le=100)
+    retrieval_lambda_mult: float = Field(default=0.7, ge=0, le=1)
+    retrieval_max_tokens: int = Field(default=12000, gt=0, le=12000)
 
     # ------------------------------------------------------------------
     # OCI Object Storage (proveedor real; el issue #14 lo consume).
@@ -134,6 +138,8 @@ class Configuracion(BaseSettings):
 
     @model_validator(mode="after")
     def _reglas_de_entorno(self) -> "Configuracion":
+        if self.retrieval_fetch_k < self.retrieval_k:
+            raise ValueError("RETRIEVAL_FETCH_K debe ser mayor o igual que RETRIEVAL_K")
         """Regla 1: los mocks son de desarrollo/CI/test, jamás de producción.
 
         §8.2: "MOCK_OCI=1 habilita almacenamiento local únicamente en

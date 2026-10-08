@@ -68,6 +68,15 @@ def _filtro(workspace_id: str, document_id: str, version: str | None = None) -> 
     return {"$and": condiciones}
 
 
+def seccion_del_chunk(chunk: Chunk) -> str:
+    """ID de alcance trazable: encabezado, página PDF o documento sin encabezado."""
+    return (
+        chunk.seccion
+        if chunk.seccion and chunk.seccion.strip()
+        else (f"pagina:{chunk.pagina}" if chunk.pagina is not None else "documento")
+    )
+
+
 class VectorStoreChroma:
     """Un único escritor, ruta dentro de DATA_DIR; catálogo SQLite WAL derivado.
 
@@ -315,31 +324,56 @@ class VectorStoreChroma:
                 )
 
     def buscar(
-        self, workspace_id: str, document_id: str, consulta: str, *, contexto: ContextoEjecucion, limite: int = 15
+        self,
+        workspace_id: str,
+        document_id: str,
+        consulta: str,
+        *,
+        contexto: ContextoEjecucion,
+        limite: int = 15,
+        seccion: str | None = None,
     ) -> list[CoincidenciaVectorial]:
         self._autorizar(workspace_id, document_id, contexto)
-        return self._buscar(self._privada, workspace_id, document_id, consulta, contexto, limite)
+        return self._buscar(self._privada, workspace_id, document_id, consulta, contexto, limite, seccion)
 
     def buscar_demo(
-        self, document_id: str, consulta: str, *, contexto: ContextoEjecucion, limite: int = 15
+        self,
+        document_id: str,
+        consulta: str,
+        *,
+        contexto: ContextoEjecucion,
+        limite: int = 15,
+        seccion: str | None = None,
     ) -> list[CoincidenciaVectorial]:
         clave_documento(DEMO_WORKSPACE_ID, document_id)
         contexto.chequear()
-        return self._buscar(self._demo, DEMO_WORKSPACE_ID, document_id, consulta, contexto, limite)
+        return self._buscar(self._demo, DEMO_WORKSPACE_ID, document_id, consulta, contexto, limite, seccion)
 
-    def _buscar(self, coleccion, workspace_id, document_id, consulta, contexto, limite):
+    def _buscar(self, coleccion, workspace_id, document_id, consulta, contexto, limite, seccion):
         if type(limite) is not int or not 1 <= limite <= 100:
             raise ValueError("limite debe estar entre 1 y 100")
         activo = self._activo(coleccion, workspace_id, document_id)
         if activo is None:
             return []  # No consume Gemini por un documento inexistente/ajeno.
-        self._datos(coleccion, activo)
+        datos_activos = self._datos(coleccion, activo)
+        filtro = _filtro(workspace_id, document_id, activo["version"])
+        cantidad = activo["cantidad"]
+        if seccion is not None:
+            ordenes = [
+                m["orden"]
+                for m in datos_activos["metadatas"]
+                if seccion_del_chunk(Chunk.model_validate_json(m["chunk"])) == seccion
+            ]
+            if not ordenes:
+                return []
+            filtro["$and"].append({"orden": {"$in": ordenes}})
+            cantidad = len(ordenes)
         vector = self.embeddings.embed_query(consulta, contexto=contexto)
         contexto.chequear()
         datos = coleccion.query(
             query_embeddings=[vector],
-            n_results=min(limite, activo["cantidad"]),
-            where=_filtro(workspace_id, document_id, activo["version"]),
+            n_results=min(limite, cantidad),
+            where=filtro,
             include=["metadatas", "distances", "embeddings"],
         )
         resultado = []
