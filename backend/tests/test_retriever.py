@@ -74,6 +74,7 @@ def chunk(i, texto, seccion="VCN", *, workspace="espacio-a", documento="doc-a"):
         cantidad_tokens=1,
         pagina=i + 1,
         seccion=seccion,
+        seccion_id=seccion,
         source_name="redes_vcn_oci.pdf",
         source_type="pdf",
         language="es",
@@ -253,3 +254,38 @@ def test_cancelacion_tras_busqueda_y_deadline(pila, monkeypatch):
     ctx.deadline = time.monotonic() - 1
     with pytest.raises(DeadlineExcedidoError):
         recuperador.recuperar("espacio-a", "doc-a", "VCN", contexto=ctx)
+
+
+def test_encabezados_repetidos_tienen_ids_distintos_y_citas_originales(pila):
+    indice, _, _ = pila
+    texto = "# Configuración\nNAT para salida privada.\n# Configuración\nRutas hacia destinos autorizados.\n"
+    # El parser de Markdown conserva la línea del encabezado, no solo el título.
+    parseado = parsear_archivo(texto.encode(), "repetidas.md")
+    originales = [c.como_chunk_interno() for c in trocear(parseado, "espacio-a", "repetido")]
+    assert [c.seccion for c in originales] == ["Configuración", "Configuración"]
+    assert [c.seccion_id for c in originales] == ["seccion:1", "seccion:3"]
+    assert originales == [c.como_chunk_interno() for c in trocear(parseado, "espacio-a", "repetido")]
+    indice.indexar("espacio-a", "repetido", originales, contexto=contexto())
+    recuperador = RetrieverMMR(indice, configuracion=configuracion())
+    resultado = recuperador.recuperar(
+        "espacio-a", "repetido", "Configuración", contexto=contexto(), seccion="seccion:3"
+    )
+    assert resultado.evidencia and all(e.chunk.seccion_id == "seccion:3" for e in resultado.evidencia)
+    assert all(e.como_referencia().seccion == "Configuración" for e in resultado.evidencia)
+    assert all("NAT" not in e.chunk.texto for e in resultado.evidencia)
+
+
+def test_indice_heredado_ambiguo_exige_reconstruccion(pila):
+    indice, _, _ = pila
+    originales = [chunk(0, "NAT."), chunk(1, "Rutas.")]
+    originales = [c.model_copy(update={"pagina": None, "source_type": "md", "seccion_id": None}) for c in originales]
+    indice.indexar(
+        "espacio-a",
+        "heredado",
+        [c.model_copy(update={"document_id": "heredado"}) for c in originales],
+        contexto=contexto(),
+    )
+    with pytest.raises(IndiceInconsistenteError, match="reconstruir"):
+        RetrieverMMR(indice, configuracion=configuracion()).recuperar(
+            "espacio-a", "heredado", "VCN", contexto=contexto(), seccion="VCN"
+        )

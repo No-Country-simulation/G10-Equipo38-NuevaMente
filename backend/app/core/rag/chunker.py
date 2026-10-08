@@ -108,6 +108,7 @@ class ChunkTexto:
     linea_fin: int | None = None
     language: str = "es"
     tokenizer: str = ""
+    section_id: str | None = None
 
     def metadatos_chroma(self) -> dict[str, str | int | float | bool]:
         """Metadatos adaptados a lo que Chroma acepta (sin None).
@@ -129,6 +130,8 @@ class ChunkTexto:
         }
         if self.page is not None:
             metadatos["page"] = self.page
+        if self.section_id is not None:
+            metadatos["section_id"] = self.section_id
         if self.section_title is not None:
             metadatos["section_title"] = self.section_title
         if self.linea_inicio is not None:
@@ -147,6 +150,7 @@ class ChunkTexto:
             texto=self.texto,
             pagina=self.page,
             seccion=self.section_title,
+            seccion_id=self.section_id,
             cantidad_tokens=self.tokens,
             workspace_id=self.workspace_id,
             document_hash=self.document_hash,
@@ -417,7 +421,9 @@ def trocear(
     grupos = []
     if resultado.extension == "pdf":
         for pagina in resultado.paginas:
-            grupos.append((_bloques_de_lineas(pagina.texto.split("\n"), None, pagina.numero, None), ""))
+            grupos.append(
+                (_bloques_de_lineas(pagina.texto.split("\n"), None, pagina.numero, None), "", f"pagina:{pagina.numero}")
+            )
     elif resultado.extension in {"md", "txt"}:
         for seccion in resultado.secciones:
             contexto = (seccion.encabezado + "\n") if seccion.encabezado else ""
@@ -440,12 +446,12 @@ def trocear(
                     )
                 ]
                 contexto = ""
-            grupos.append((bloques, contexto))
+            grupos.append((bloques, contexto, f"seccion:{seccion.linea_inicio}"))
     else:
         raise ValueError("Formato no soportado por el chunker")
 
     chunks = []
-    for bloques, contexto in grupos:
+    for bloques, contexto, section_id in grupos:
 
         def render(paquete):
             return contexto + "\n\n".join(b.texto for b in paquete)
@@ -497,6 +503,7 @@ def trocear(
                     ultimo.linea_fin,
                     idioma,
                     tokenizador.identidad,
+                    section_id,
                 )
             )
             paquete = _cola(ultimo, config.solapamiento, contar)

@@ -53,6 +53,9 @@ class Chunk(BaseModel):
     texto: str = Field(min_length=1)
     pagina: int | None = Field(default=None, ge=1)
     seccion: str | None = None
+    seccion_id: str | None = Field(
+        default=None, min_length=1, description="ID estructural distinto del título visible."
+    )
     cantidad_tokens: int = Field(gt=0)
     workspace_id: str | None = None
     document_hash: str | None = None

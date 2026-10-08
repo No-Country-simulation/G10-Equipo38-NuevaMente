@@ -69,12 +69,22 @@ def _filtro(workspace_id: str, document_id: str, version: str | None = None) -> 
 
 
 def seccion_del_chunk(chunk: Chunk) -> str:
-    """ID de alcance trazable: encabezado, página PDF o documento sin encabezado."""
-    return (
-        chunk.seccion
-        if chunk.seccion and chunk.seccion.strip()
-        else (f"pagina:{chunk.pagina}" if chunk.pagina is not None else "documento")
-    )
+    """ID estructural; una página identifica ubicación, no un tema del PDF."""
+    if chunk.seccion_id:
+        return chunk.seccion_id
+    if chunk.pagina is not None:
+        return f"pagina:{chunk.pagina}"
+    return chunk.seccion if chunk.seccion and chunk.seccion.strip() else "documento"
+
+
+def validar_secciones_heredadas(chunks: list[Chunk]) -> None:
+    """Sin ID no se pueden distinguir dos encabezados iguales de una sección larga."""
+    vistos = set()
+    for chunk in chunks:
+        if chunk.seccion_id is None and chunk.pagina is None and chunk.seccion:
+            if chunk.seccion in vistos:
+                raise IndiceInconsistenteError("Secciones sin ID estructural ambiguas; reconstruir desde el original")
+            vistos.add(chunk.seccion)
 
 
 class VectorStoreChroma:
@@ -359,6 +369,7 @@ class VectorStoreChroma:
         filtro = _filtro(workspace_id, document_id, activo["version"])
         cantidad = activo["cantidad"]
         if seccion is not None:
+            validar_secciones_heredadas([Chunk.model_validate_json(m["chunk"]) for m in datos_activos["metadatas"]])
             ordenes = [
                 m["orden"]
                 for m in datos_activos["metadatas"]
