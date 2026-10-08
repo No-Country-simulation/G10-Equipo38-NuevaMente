@@ -28,7 +28,7 @@ from unittest.mock import Mock
 import pytest
 from app.config import Configuracion, ConfiguracionIncompleta
 from app.main import CABECERA_REQUEST_ID, crear_app
-from app.storage.provider import StorageProvider
+from app.storage.provider import StorageBudgetExceeded, StorageProvider, StorageUnavailable
 from fastapi.testclient import TestClient
 
 # Marca del módulo completo: estos tests son de unidad (sin red, sin IO).
@@ -59,6 +59,20 @@ def test_health_responde_200_sin_secretos(cliente):
     texto = str(cuerpo).lower()
     for secreto_prohibido in ("placeholder", "api_key", "google", "oci_", "password"):
         assert secreto_prohibido not in texto
+
+
+@pytest.mark.parametrize("error", [StorageUnavailable, StorageBudgetExceeded])
+def test_storage_fallido_devuelve_503_sin_detalles_del_sdk(cliente, error):
+    @cliente.app.get("/prueba-storage")
+    def fallar():
+        raise error("SDK token-secreto")
+
+    respuesta = cliente.get("/prueba-storage")
+    assert respuesta.status_code == 503
+    cuerpo = respuesta.json()
+    assert cuerpo["error"]["code"] == "STORAGE_UNAVAILABLE"
+    assert cuerpo["request_id"] == respuesta.headers[CABECERA_REQUEST_ID]
+    assert "token-secreto" not in respuesta.text
 
 
 def test_toda_respuesta_lleva_request_id_generado(cliente):
@@ -147,6 +161,7 @@ def test_produccion_completa_arranca(tmp_path, monkeypatch):
             mock_gemini=False,
             google_api_key="AIza_real_de_prueba",
             oci_compartment_id="ocid1.compartment.oc1..x",
+            oci_always_free_confirmed=True,
             oci_region="us-ashburn-1",
             oci_config_file=str(archivo_credenciales),
             data_dir=str(tmp_path / "datos"),

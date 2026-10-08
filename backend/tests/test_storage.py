@@ -216,20 +216,20 @@ def test_factory_mock_oci_0_sin_credenciales_falla_visible(tmp_path, monkeypatch
     assert "MOCK_OCI=1" in mensaje
 
 
-def test_factory_mock_oci_0_con_credenciales_sigue_fallando_hasta_el_issue_14(tmp_path, monkeypatch):
-    """Con credenciales presentes pero sin proveedor real (#14 pendiente), el
-    arranque tampoco fabrica un mock: el fallo sigue siendo visible."""
+def test_factory_real_con_archivo_credenciales_inexistente_no_activa_mock(tmp_path, monkeypatch):
+    """Variables presentes no alcanzan: las credenciales deben existir y ser válidas."""
     monkeypatch.setenv("MOCK_OCI", "0")
     monkeypatch.setenv("OCI_BUCKET_NAME", BUCKET_PRODUCCION)
     monkeypatch.setenv("OCI_COMPARTMENT_ID", "ocid1.compartment.oc1..test")
     monkeypatch.setenv("OCI_REGION", "us-ashburn-1")
-    monkeypatch.setenv("OCI_CONFIG_FILE", "/run/oci/config")
+    monkeypatch.setenv("OCI_CONFIG_FILE", str(tmp_path / "inexistente"))
+    monkeypatch.setenv("OCI_ALWAYS_FREE_CONFIRMED", "1")
 
     from app.storage.provider import StorageConfigError
 
     with pytest.raises(StorageConfigError) as info:
         get_storage_provider(base_dir=tmp_path)
-    assert "issue #14" in str(info.value)
+    assert "OCI_CONFIG_FILE" in str(info.value)
 
 
 # Marca de modulo (infraestructura del issue #10): la CI selecciona

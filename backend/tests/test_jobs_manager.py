@@ -42,6 +42,7 @@ from app.jobs.manager import (
 )
 from app.jobs.store import RegistroOperativo
 from app.schemas.enums import JobStatus
+from app.storage.provider import StorageBudgetExceeded, StorageUnavailable
 
 
 def test_contexto_rechaza_async_sin_consumir_cuota():
@@ -474,6 +475,22 @@ def test_reintentos_agotados_falla_con_codigo(gestor, store):
     # La columna cuenta REINTENTOS efectuados (§7.5: hasta dos), no el
     # intento original: 2 reintentos => 3 ejecuciones de la función.
     assert final["intentos"] == 2
+
+
+@pytest.mark.parametrize("error", [StorageUnavailable, StorageBudgetExceeded])
+def test_persistencia_fallida_no_completa_ni_repite_pipeline(gestor, store, error):
+    llamadas = []
+
+    def persistir(ctx):
+        llamadas.append(ctx.job_id)
+        raise error("respuesta SDK con token-secreto")
+
+    job = gestor.enqueue("ws_a", "generacion", persistir)
+    final = esperarlo(store, job, JobStatus.FAILED)
+    assert final["error_code"] == "STORAGE_UNAVAILABLE"
+    assert final["resultado"] is None
+    assert final["intentos"] == 0 and llamadas == [job]
+    assert "token-secreto" not in final["error_message"]
 
 
 def test_error_permanente_no_reintenta(gestor, store):

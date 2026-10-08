@@ -157,6 +157,33 @@ Listado paginado con filtros: `documento`, `perfil`, `formato`, `idioma`, `desde
 - OCI mantiene la política propia de Issue 14: escrituras idempotentes, hasta tres intentos totales y contabilización de solicitudes de storage. No usa cuotas Gemini ni añade otro bucle a `ctx.llamar`.
 - Los endpoints comunes `GET /api/jobs/{id}`, `GET /api/jobs/{id}/events` y `POST /api/jobs/{id}/cancel` pertenecen a **Issue 20**. Issue 19 los consume, sin volver a implementarlos. El gestor se inicia y detiene en el lifespan de la API; al detenerse se espera su worker antes de cerrar SQLite.
 
+### Almacenamiento real (Issue 14)
+
+- `OCIObjectStorageProvider` implementa el mismo `StorageProvider` que el mock:
+  upload/get/get_as_text/list/delete, condiciones ETag y cursor exclusivo del último
+  objeto. Los constructores de claves canónicas viven en `storage/object_keys.py`;
+  el nombre original se conserva en el manifiesto, no en la clave de almacenamiento.
+- La fábrica usa OCI solo con `MOCK_OCI=0`, sin fallback. Credenciales por archivo
+  (`OCI_CONFIG_PROFILE`) o identidad de instancia (`OCI_AUTH_TYPE`); consulta la home
+  region y namespace y verifica compartimento, bucket privado Standard, cifrado Oracle,
+  sin versionado, replicación ni auto-tiering. La API no crea buckets.
+- El SDK lleva `NoneRetryStrategy`. Hasta tres intentos por operación; PUT conserva
+  objeto/bytes/nonce/condiciones y reconcilia respuestas perdidas contra sus bytes y nonce.
+  Verificaciones GET son solicitudes independientes, contabilizadas, sin repetir PUT
+  por un fallo posterior de confirmación. OCI no utiliza cuotas Gemini ni `ctx.llamar`.
+- `OCI_ALWAYS_FREE_CONFIRMED=1` declara que el operador verificó asignación/consumo
+  agregado de la tenancy. No verifica facturación automáticamente. Un ledger SQLite
+  en DATA_DIR reserva antes de cada intento, incluidos fallidos, con máximos iniciales
+  de 5.000 solicitudes/mes y 1 GB; conserva reservas de escrituras inciertas. Issue 50
+  completa auditoría agregada/conciliación/retención. `StorageBudgetExceeded` es un
+  `StorageUnavailable`: no admite enviar otra solicitud por encima del presupuesto.
+  En HTTP responde `503 / STORAGE_UNAVAILABLE`; en el worker termina `failed` con
+  ese código y sin resultado, sin repetir el pipeline ni exponer mensajes del SDK.
+- Guía, IAM mínimo, configuración Windows/Docker y smoke manual:
+  `docs/oci-storage.md`. `app.tools.verify_oci` prueba originales/JSON técnicos y los
+  limpia; `--create-bucket` permite provisionamiento manual explícito, con permisos
+  separados. Tests SDK/HTTP simulados no acreditan una tenancy real ni Gemini.
+
 ### Trabajos comunes (Issue 20)
 
 GET /api/jobs/{id}, GET /api/jobs/{id}/events y POST /api/jobs/{id}/cancel permiten consultar, seguir y cancelar ingestión/chat/glosario.

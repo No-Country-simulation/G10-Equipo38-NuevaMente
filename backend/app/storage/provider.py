@@ -90,6 +90,10 @@ class StorageInvalidName(StorageError):
     """
 
 
+class StorageBudgetExceeded(StorageUnavailable):
+    """Límite conservador OCI; se rechaza antes de emitir otra solicitud."""
+
+
 class StorageConfigError(StorageError):
     """Configuración insuficiente para arrancar el proveedor REAL.
 
