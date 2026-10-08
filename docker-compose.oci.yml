@@ -1,0 +1,14 @@
+# Uso explícito: --env-file .env.oci.local -f docker-compose.yml -f docker-compose.oci.yml
+services:
+  backend:
+    environment:
+      OCI_CONFIG_FILE: /run/oci/config
+      OCI_CONFIG_PROFILE: DOCKER
+      OCI_AUTH_TYPE: api_key
+    volumes:
+      - type: bind
+        source: ${OCI_CREDENTIALS_DIR:?Configurar directorio dedicado de credenciales OCI}
+        target: /run/oci
+        read_only: true
+        bind:
+          create_host_path: false

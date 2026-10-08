@@ -93,6 +93,12 @@ class Configuracion(BaseSettings):
     oci_compartment_id: str = "placeholder"
     oci_region: str = "home-region-de-la-tenancy"
     oci_config_file: str = "/run/oci/config"
+    oci_config_profile: str = "DEFAULT"
+    oci_auth_type: Literal["api_key", "instance_principal"] = "api_key"
+    oci_always_free_confirmed: bool = False
+    oci_timeout_seconds: float = Field(default=30, gt=0, le=60)
+    oci_max_requests_per_month: int = Field(default=5000, ge=1, le=5000)
+    oci_max_storage_bytes: int = Field(default=1_000_000_000, ge=1, le=1_000_000_000)
 
     # ------------------------------------------------------------------
     # Estado local y decisiones operativas (Apéndice A).
@@ -171,9 +177,11 @@ class Configuracion(BaseSettings):
 
         if self.google_api_key.strip() in ("", "placeholder"):
             problemas.append("GOOGLE_API_KEY no esta configurada (queda 'placeholder')")
+        if not self.oci_always_free_confirmed:
+            problemas.append("OCI_ALWAYS_FREE_CONFIRMED requiere verificar capacidad gratuita disponible en la tenancy")
         if self.oci_compartment_id.strip() in ("", "placeholder"):
             problemas.append("OCI_COMPARTMENT_ID no esta configurada (queda 'placeholder')")
-        if not Path(self.oci_config_file).is_file():
+        if self.oci_auth_type == "api_key" and not Path(self.oci_config_file).is_file():
             problemas.append(
                 f"OCI_CONFIG_FILE apunta a un archivo inexistente ({self.oci_config_file}); "
                 "montar las credenciales (§8.2)"
