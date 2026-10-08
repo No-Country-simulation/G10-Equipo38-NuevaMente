@@ -15,8 +15,9 @@ El despliegue de la VM y HTTPS pertenecen a los issues 47/48.
 5. Crear el bucket **privado** `nuevamente-contenidos-educativos` en ese compartimento:
    **Standard**, cifrado administrado por Oracle, versionado desactivado, sin
    replicación ni auto-tiering. La aplicación valida estos atributos y no los cambia.
-6. Crear un usuario técnico y un grupo dedicado para la aplicación. La clave de un
-   administrador conserva sus privilegios aunque se lo agregue a un grupo limitado;
+6. Crear un usuario técnico (`nuevamente-object-storage-app`, por ejemplo) y un
+   grupo dedicado para la aplicación. La clave de un administrador conserva sus
+   privilegios aunque se lo agregue a un grupo limitado;
    para acreditar permisos mínimos se usa el usuario técnico sin pertenencia a Administrators.
 7. Agregarle una API signing key al usuario técnico. Descargar la clave privada y
    guardar el fragmento de configuración que muestra OCI. Nunca guardar la clave
@@ -31,16 +32,16 @@ Recursos oficiales:
 
 ## 2. Permisos mínimos
 
-Crear la política en la raíz de la tenancy. Adaptar `Default/NuevaMenteStorage`
+Crear la política en la raíz de la tenancy. Adaptar `Default/NuevaMenteObjectStorageApp`
 al dominio/grupo y `nuevamente` al compartimento real. Agregar el usuario técnico
 al grupo. La aplicación necesita consultar la región principal, el namespace y los
 atributos del bucket, además de crear/leer/listar/actualizar/borrar sus objetos.
 
 ```text
-Allow group Default/NuevaMenteStorage to inspect tenancies in tenancy where request.operation = 'ListRegionSubscriptions'
-Allow group Default/NuevaMenteStorage to read objectstorage-namespaces in tenancy where request.operation = 'GetNamespace'
-Allow group Default/NuevaMenteStorage to read buckets in compartment nuevamente where all {target.bucket.name = 'nuevamente-contenidos-educativos', request.operation = 'GetBucket'}
-Allow group Default/NuevaMenteStorage to manage objects in compartment nuevamente where all {target.bucket.name = 'nuevamente-contenidos-educativos', any {request.permission = 'OBJECT_INSPECT', request.permission = 'OBJECT_READ', request.permission = 'OBJECT_CREATE', request.permission = 'OBJECT_OVERWRITE', request.permission = 'OBJECT_DELETE'}}
+Allow group Default/NuevaMenteObjectStorageApp to inspect tenancies in tenancy where request.operation = 'ListRegionSubscriptions'
+Allow group Default/NuevaMenteObjectStorageApp to read objectstorage-namespaces in tenancy where request.operation = 'GetNamespace'
+Allow group Default/NuevaMenteObjectStorageApp to read buckets in compartment nuevamente where all {target.bucket.name = 'nuevamente-contenidos-educativos', request.operation = 'GetBucket'}
+Allow group Default/NuevaMenteObjectStorageApp to manage objects in compartment nuevamente where all {target.bucket.name = 'nuevamente-contenidos-educativos', any {request.permission = 'OBJECT_INSPECT', request.permission = 'OBJECT_READ', request.permission = 'OBJECT_CREATE', request.permission = 'OBJECT_OVERWRITE', request.permission = 'OBJECT_DELETE'}, any {request.operation = 'PutObject', request.operation = 'GetObject', request.operation = 'ListObjects', request.operation = 'DeleteObject'}}
 ```
 
 No concede crear buckets, cambiar clase, hacer público el bucket, habilitar

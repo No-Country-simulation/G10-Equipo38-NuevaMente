@@ -227,12 +227,14 @@ graph TD
 - Implementar escrituras condicionales y paginación de Issue 04; contabilizar solicitudes SDK incluidos reintentos y reservar presupuesto conservador desde la primera prueba real. Issue 50 completa la auditoría.
 
 **Criterios de aceptación**:
-- [ ] Un put + get + list reales contra el bucket funcionan con credenciales mínimas del compartimento.
-- [ ] Los prefijos creados coinciden 1:1 con §8.3.
-- [ ] Error de red simulado (DNS roto) produce `failed`/`STORAGE_UNAVAILABLE`, no mock.
-- [ ] Sin credenciales y `MOCK_OCI=0`: arranque falla con mensaje claro.
+- [x] Un put + get + list reales contra el bucket funcionan con credenciales mínimas del compartimento.
+- [x] Los prefijos creados coinciden 1:1 con §8.3.
+- [x] Error de red simulado (DNS roto) produce `failed`/`STORAGE_UNAVAILABLE`, no mock.
+- [x] Sin credenciales y `MOCK_OCI=0`: arranque falla con mensaje claro.
 
 **Verificación**: `pytest backend/tests/test_storage_oci.py backend/tests/test_storage_oci_sdk.py backend/tests/test_verify_oci.py` (SDK/HTTP simulados) + `python -m app.tools.verify_oci` contra OCI real. Guía: `docs/oci-storage.md`. La aceptación completa exige el reporte manual satisfactorio; los dobles no lo sustituyen.
+
+**Evidencia manual — 2026-10-08**: prueba real en la home region `sa-vinhedo-1` con usuario técnico y grupo dedicado, sin Administrators. Dos objetos técnicos (original y JSON) escritos, leídos y listados; bytes verificados y temporales eliminados. Se contabilizaron 16 solicitudes, sin reservas inciertas. También se verificó la denegación de `ListUsers` y `ListBuckets`. Esto acredita almacenamiento real del Issue 14; no acredita Gemini ni despliegue completo.
 
 ---
 
