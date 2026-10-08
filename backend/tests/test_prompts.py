@@ -222,6 +222,13 @@ def test_critic_revisa_borrador_y_metadatos_y_preserva_fallo_factual():
         preparar(metadatos=borrador.metadatos)
 
 
+@pytest.mark.parametrize("preparados", [False, True])
+def test_prompts_conservan_version_al_serializar_y_revalidar(preparados):
+    prompts = preparar() if preparados else cargar_plantilla(SOLICITUD)
+    reconstruido = type(prompts).model_validate_json(prompts.model_dump_json())
+    assert reconstruido == prompts and reconstruido.prompt_version == PROMPT_VERSION
+
+
 def test_version_registrada_en_paquete_canonico_sin_prompts_completos():
     prompts = preparar()
     trace = Trazabilidad(
