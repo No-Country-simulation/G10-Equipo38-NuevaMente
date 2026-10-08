@@ -3,9 +3,9 @@
 Aquí viven DOS cosas, y es fácil confundirlas:
 
 1. `LocalMockStorageProvider`: la implementación de `StorageProvider` que
-   guarda archivos locales bajo `.data/oci_mock_storage/`. Es la única que
-   existe HOY; imita la semántica de OCI Object Storage (ETag, creación y
-   actualización condicionales, paginación) usando solo la biblioteca
+   guarda archivos locales bajo `.data/oci_mock_storage/`. Imita la semántica
+   de OCI Object Storage (ETag, creación y actualización condicionales,
+   paginación) usando solo la biblioteca
    estándar de Python, para que desarrollo y CI corran sin red, sin
    credenciales y sin costo.
 
@@ -19,8 +19,8 @@ Aquí viven DOS cosas, y es fácil confundirlas:
                       exactamente el falso positivo que §12.2 (criterio 10)
                       prohíbe demostrar.
 
-   El proveedor OCI REAL llega con el issue #14; hasta entonces, pedir modo
-   real falla en el arranque con StorageConfigError explicando qué falta.
+   El proveedor OCI real (#14) valida credenciales, home region y el bucket
+   preexistente; errores de configuración/red son visibles, sin fallback.
 
 Cómo el mock imita a OCI, para quien lo lea después:
 
@@ -44,9 +44,12 @@ import os
 import threading
 from datetime import datetime, timezone
 from functools import wraps
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from app.storage.object_keys import BUCKET_PRODUCCION as BUCKET_PRODUCCION
+from app.storage.object_keys import validar_nombre as _validar_object_name
+from app.storage.oci_real import OCIObjectStorageProvider as OCIObjectStorageProvider
 from app.storage.provider import (
     ListedObject,
     StorageConfigError,
@@ -58,11 +61,7 @@ from app.storage.provider import (
     StoredObject,
 )
 
-# El bucket de producción como constante única (§8.1): el mock replica sus
-# prefijos, y el proveedor real (#14) usará este mismo nombre.
-BUCKET_PRODUCCION = "nuevamente-contenidos-educativos"
-
-# Variables que exigirá el proveedor real (issue #14), según el Apéndice A.
+# Variables del proveedor real; el mock conserva el contrato de nombres de §8.3.
 VARIABLES_REQUERIDAS_REAL = ("OCI_BUCKET_NAME", "OCI_COMPARTMENT_ID", "OCI_REGION", "OCI_CONFIG_FILE")
 
 # Un proceso escritor; instancias que apuntan al mismo bucket comparten exclusión.
@@ -89,29 +88,6 @@ def _escribir_atomico(ruta: Path, contenido: bytes) -> None:
     finally:
         if temporal is not None:
             temporal.unlink(missing_ok=True)
-
-
-def _validar_object_name(object_name: str) -> None:
-    """Rechaza claves que no respetan el formato del proyecto (§8.1, §11.3).
-
-    Por qué importa tanto: el mock convierte object_name en RUTA de
-    archivo. Si aceptáramos "../secrets.env", alguien podría escapar del
-    directorio base y leer/escribir fuera (path traversal). OCI real no
-    tiene ese riesgo, pero compartimos la validación para que un nombre
-    válido en mock lo sea también en producción.
-    """
-    if not object_name or object_name.startswith("/") or "\\" in object_name:
-        raise StorageInvalidName(f"object_name inválido: {object_name!r}")
-    partes = object_name.split("/")
-    if partes[0].casefold() == "_meta.json":
-        raise StorageInvalidName("Nombre reservado para metadatos internos")
-    if any(parte in ("", ".", "..") for parte in partes):
-        raise StorageInvalidName(f"object_name inválido (segmento vacío o relativo): {object_name!r}")
-    for parte in partes:
-        if parte.endswith(".") or PureWindowsPath(parte).is_reserved():
-            raise StorageInvalidName("Nombre no portable entre Windows y Linux")
-        if not all(caracter.isalnum() or caracter in "._-@" for caracter in parte):
-            raise StorageInvalidName(f"object_name con caracteres no permitidos: {object_name!r}")
 
 
 class LocalMockStorageProvider(StorageProvider):
@@ -277,11 +253,9 @@ def get_storage_provider(base_dir: Path | str | None = None, *, configuracion=No
     leyendo entorno y .env con las mismas reglas que el backend.
 
     - MOCK_OCI=1 -> LocalMockStorageProvider. Sin red, sin credenciales.
-    - MOCK_OCI=0 (o sin definir) -> proveedor real. HOY ese proveedor llega
-      con el issue #14, así que falta-credenciales o no, el arranque falla
-      con StorageConfigError. El mensaje lista QUÉ falta para que arreglar
-      sea obvio — y nunca, en ninguna rama, se devuelve el mock en su
-      lugar (criterio de aceptación 3 del issue #04).
+    - MOCK_OCI=0 -> OCI real: región y bucket verificados. Credenciales
+      inválidas/faltantes y fallos del servicio son errores visibles.
+      Nunca se devuelve un mock por un fallo real.
     """
     try:
         from app.config import Configuracion
@@ -296,8 +270,4 @@ def get_storage_provider(base_dir: Path | str | None = None, *, configuracion=No
         return LocalMockStorageProvider(
             base_dir=base_dir if base_dir is not None else Path(ajustes.data_dir) / "oci_mock_storage"
         )
-    raise StorageConfigError(
-        "MOCK_OCI=0 exige almacenamiento OCI real: el proveedor real se implementa en el issue #14. "
-        "Configurar OCI_BUCKET_NAME, OCI_COMPARTMENT_ID, OCI_REGION, OCI_CONFIG_FILE y ese proveedor; "
-        "para desarrollo/CI usar MOCK_OCI=1."
-    )
+    return OCIObjectStorageProvider(ajustes)

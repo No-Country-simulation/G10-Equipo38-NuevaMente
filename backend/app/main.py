@@ -52,6 +52,7 @@ from app.jobs.manager import ControlesOperativos, GestorTrabajos
 from app.jobs.store import RegistroOperativo
 from app.schemas.errors import ErrorAplicacion, ErrorBody, ErrorCode, ErrorResponse
 from app.storage.oci_storage import get_storage_provider
+from app.storage.provider import StorageUnavailable
 
 # ContextVar: una variable que vale "para la petición actual". Los módulos
 # de negocio podrán leer el request_id para logging sin pasarlo a mano por
@@ -129,6 +130,9 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         finally:
             # No cerrar SQLite si todavía hay una llamada en vuelo.
             gestor.detener()
+            cerrar_storage = getattr(app.state.storage_provider, "cerrar", None)
+            if callable(cerrar_storage):
+                cerrar_storage()
             app.state.db.cerrar()
 
     app = FastAPI(
@@ -191,6 +195,19 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         )
 
     # ------------------------- Handlers de excepción -------------------------
+
+    @app.exception_handler(StorageUnavailable)
+    async def manejar_storage(request: Request, exc: StorageUnavailable):
+        request_id = _request_id_de(request)
+        return JSONResponse(
+            status_code=503,
+            content=_envoltorio(
+                ErrorCode.STORAGE_UNAVAILABLE,
+                "El almacenamiento no está disponible; revisar OCI y su presupuesto.",
+                request_id,
+            ),
+            headers={CABECERA_REQUEST_ID: request_id},
+        )
 
     @app.exception_handler(ErrorAplicacion)
     async def manejar_dominio(request: Request, exc: ErrorAplicacion):

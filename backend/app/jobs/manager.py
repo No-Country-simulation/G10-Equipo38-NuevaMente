@@ -71,6 +71,7 @@ from typing import Any, Callable
 from app.jobs.store import RegistroOperativo
 from app.schemas.enums import JobStatus
 from app.schemas.internal import PresupuestoLlamadas
+from app.storage.provider import StorageUnavailable
 
 _GESTORES_ACTIVOS: dict[str, object] = {}
 _GUARDIA_GESTORES = threading.Lock()
@@ -592,6 +593,14 @@ class GestorTrabajos:
                 JobStatus.FAILED,
                 "Falló una operación transitoria; no se repite el trabajo completo.",
                 error_code="REINTENTOS_AGOTADOS",
+            )
+            return
+        except StorageUnavailable:
+            self._finalizar(
+                job_id,
+                JobStatus.FAILED,
+                "No se pudo confirmar la persistencia del trabajo; revisar OCI y su presupuesto.",
+                error_code="STORAGE_UNAVAILABLE",
             )
             return
         except Exception:  # noqa: BLE001 - el worker nunca debe morir
