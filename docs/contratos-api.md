@@ -655,3 +655,38 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
 - El llamador puede reducir presupuesto_tokens y exigir source_hash. El contexto
   se revalida tras la consulta y durante selección; fallos/cuotas/cancelación se propagan.
   Estas pruebas con Chroma nativo y embeddings simulados no acreditan Gemini real.
+
+
+### Researcher y cobertura (Issue 27, contrato interno)
+
+- `VectorStoreChroma.listar_chunks(..., contexto, source_hash)` devuelve el
+  inventario privado de la versión autorizada, sin consumir Gemini. Comprueba
+  hash, procedencia, lápidas, cancelación y cambios del índice durante la lectura.
+- `DependenciasResearcher` inyecta DependenciasGrafo, RetrieverMMR y la versión
+  del parser registrada por la ingestión. No se infiere esa versión desde el
+  código instalado ni se serializan clientes en EstadoGrafo.
+- `researcher` deriva el índice de secciones desde Chunk.seccion_id; exige que
+  el registro preparado por Supervisor enumere los mismos IDs. Encabezados
+  repetidos son secciones diferentes. `pagina:N` solo delimita ubicación de PDF,
+  sin afirmar que una página sea un tema. El lector documental de Issue 19 debe
+  usar estos mismos IDs al enumerar alcances.
+- Planifica búsquedas deterministas con el título como datos y el foco de
+  perfil/formato en el idioma de origen. La consulta registrada en cada evidencia
+  indica ese foco de uso. No interpreta instrucciones del documento ni llama
+  al LLM para redactar consultas. Las búsquedas conservan ContextoEjecucion.
+- Prioriza un fragmento por sección solicitada; luego completa con diversidad.
+  **Una sola unión deduplicada** comparte el máximo de 12.000 tokens por borrador,
+  contado sobre JSON real. Cada consulta recibe el presupuesto restante. No se
+  otorgan 12.000 tokens independientes a cada sección ni se confía en contadores
+  de tokens aportados por un proveedor de retrieval.
+- Una consulta sin cobertura puede ampliarse una vez. Las solicitudes de Critic
+  se atienden antes de extras opcionales, reutilizando evidencia vigente y los
+  contadores de redacciones/LLM; embeddings mantienen sus propias cuotas por modelo.
+- Cobertura insuficiente o presupuesto incompatible producen rejected_quality
+  con las secciones faltantes y la opción de acotar. Fallos de proveedor/cuota,
+  índice inconsistente, fuente modificada, deadline o cancelación son técnicos.
+  El update terminal elimina evidencia y borradores; nunca implica aprobación.
+- Publica secciones_cubiertas y trazabilidad para Writer sin completar el grafo
+  ni persistir. Issue 29 integrará el nodo y sus aristas terminales. Las pruebas
+  usan Chroma nativo y dobles explícitos; el caso PDF VCN simula metadata ready
+  solo para aislar el nodo y no acredita visión completada, OCI ni Gemini reales.
