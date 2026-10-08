@@ -28,6 +28,7 @@ wheels/
 .env.*
 !.env.example
 !.env.docker.example
+!.env.oci.example
 *.pem
 *.key
 oci_api_key*.pem

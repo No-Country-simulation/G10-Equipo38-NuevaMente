@@ -232,7 +232,7 @@ graph TD
 - [ ] Error de red simulado (DNS roto) produce `failed`/`STORAGE_UNAVAILABLE`, no mock.
 - [ ] Sin credenciales y `MOCK_OCI=0`: arranque falla con mensaje claro.
 
-**Verificación**: `pytest backend/tests/test_storage_oci.py` (mock de SDK) + ejecución manual del script real una vez configurada la tenancy.
+**Verificación**: `pytest backend/tests/test_storage_oci.py backend/tests/test_storage_oci_sdk.py backend/tests/test_verify_oci.py` (SDK/HTTP simulados) + `python -m app.tools.verify_oci` contra OCI real. Guía: `docs/oci-storage.md`. La aceptación completa exige el reporte manual satisfactorio; los dobles no lo sustituyen.
 
 ---
 
