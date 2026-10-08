@@ -16,5 +16,6 @@ COPY pages/ ./pages/
 
 COPY .streamlit/ .streamlit/
 COPY app.py .
+COPY api_client.py .
 
 CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0"]
