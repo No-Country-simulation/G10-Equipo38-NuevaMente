@@ -68,6 +68,25 @@ def _filtro(workspace_id: str, document_id: str, version: str | None = None) -> 
     return {"$and": condiciones}
 
 
+def seccion_del_chunk(chunk: Chunk) -> str:
+    """ID estructural; una página identifica ubicación, no un tema del PDF."""
+    if chunk.seccion_id:
+        return chunk.seccion_id
+    if chunk.pagina is not None:
+        return f"pagina:{chunk.pagina}"
+    return chunk.seccion if chunk.seccion and chunk.seccion.strip() else "documento"
+
+
+def validar_secciones_heredadas(chunks: list[Chunk]) -> None:
+    """Sin ID no se pueden distinguir dos encabezados iguales de una sección larga."""
+    vistos = set()
+    for chunk in chunks:
+        if chunk.seccion_id is None and chunk.pagina is None and chunk.seccion:
+            if chunk.seccion in vistos:
+                raise IndiceInconsistenteError("Secciones sin ID estructural ambiguas; reconstruir desde el original")
+            vistos.add(chunk.seccion)
+
+
 class VectorStoreChroma:
     """Un único escritor, ruta dentro de DATA_DIR; catálogo SQLite WAL derivado.
 
@@ -315,31 +334,57 @@ class VectorStoreChroma:
                 )
 
     def buscar(
-        self, workspace_id: str, document_id: str, consulta: str, *, contexto: ContextoEjecucion, limite: int = 15
+        self,
+        workspace_id: str,
+        document_id: str,
+        consulta: str,
+        *,
+        contexto: ContextoEjecucion,
+        limite: int = 15,
+        seccion: str | None = None,
     ) -> list[CoincidenciaVectorial]:
         self._autorizar(workspace_id, document_id, contexto)
-        return self._buscar(self._privada, workspace_id, document_id, consulta, contexto, limite)
+        return self._buscar(self._privada, workspace_id, document_id, consulta, contexto, limite, seccion)
 
     def buscar_demo(
-        self, document_id: str, consulta: str, *, contexto: ContextoEjecucion, limite: int = 15
+        self,
+        document_id: str,
+        consulta: str,
+        *,
+        contexto: ContextoEjecucion,
+        limite: int = 15,
+        seccion: str | None = None,
     ) -> list[CoincidenciaVectorial]:
         clave_documento(DEMO_WORKSPACE_ID, document_id)
         contexto.chequear()
-        return self._buscar(self._demo, DEMO_WORKSPACE_ID, document_id, consulta, contexto, limite)
+        return self._buscar(self._demo, DEMO_WORKSPACE_ID, document_id, consulta, contexto, limite, seccion)
 
-    def _buscar(self, coleccion, workspace_id, document_id, consulta, contexto, limite):
+    def _buscar(self, coleccion, workspace_id, document_id, consulta, contexto, limite, seccion):
         if type(limite) is not int or not 1 <= limite <= 100:
             raise ValueError("limite debe estar entre 1 y 100")
         activo = self._activo(coleccion, workspace_id, document_id)
         if activo is None:
             return []  # No consume Gemini por un documento inexistente/ajeno.
-        self._datos(coleccion, activo)
+        datos_activos = self._datos(coleccion, activo)
+        filtro = _filtro(workspace_id, document_id, activo["version"])
+        cantidad = activo["cantidad"]
+        if seccion is not None:
+            validar_secciones_heredadas([Chunk.model_validate_json(m["chunk"]) for m in datos_activos["metadatas"]])
+            ordenes = [
+                m["orden"]
+                for m in datos_activos["metadatas"]
+                if seccion_del_chunk(Chunk.model_validate_json(m["chunk"])) == seccion
+            ]
+            if not ordenes:
+                return []
+            filtro["$and"].append({"orden": {"$in": ordenes}})
+            cantidad = len(ordenes)
         vector = self.embeddings.embed_query(consulta, contexto=contexto)
         contexto.chequear()
         datos = coleccion.query(
             query_embeddings=[vector],
-            n_results=min(limite, activo["cantidad"]),
-            where=_filtro(workspace_id, document_id, activo["version"]),
+            n_results=min(limite, cantidad),
+            where=filtro,
             include=["metadatas", "distances", "embeddings"],
         )
         resultado = []

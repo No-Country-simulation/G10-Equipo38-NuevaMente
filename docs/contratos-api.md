@@ -627,3 +627,31 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
   únicamente contenido aprobado. El contador serializado no aplica cuotas.
   `deadline` es monotónico del proceso; tras reinicio el trabajo se interrumpe.
 - Evidencia: `backend/tests/test_supervisor.py` y snapshot JSON versionado.
+
+
+### Recuperación MMR (Issue 18, contrato interno)
+
+- `RetrieverMMR.recuperar(workspace_id, document_id, consulta, contexto=...)`
+  delega en Chroma y en los embeddings síncronos de Issue 13. La consulta conserva
+  su idioma y usa la preparación asimétrica compatible con el índice; no traduce
+  mediante otra llamada generativa. `recuperar_demo` usa la colección de lectura aparte.
+- `RETRIEVAL_K=5`, `RETRIEVAL_FETCH_K=15`, `RETRIEVAL_LAMBDA_MULT=0.7` y
+  `RETRIEVAL_MAX_TOKENS=12000` son configurables. Se exige fetch_k >= k y un
+  presupuesto positivo que no supere el límite de 12.000 tokens por borrador.
+- MMR diversifica con los vectores de Chroma y devuelve `EvidenciaRecuperada`;
+  score representa relevancia coseno, nunca fidelidad. Se deduplican IDs y textos
+  equivalentes por espacios. Procedencia, hash y vectores inválidos son fallo técnico.
+- `ResultadoRecuperacion` informa evidencia, tokens reales de su JSON con metadatos,
+  chunks_omitidos y avisos. Un fragmento que no cabe se omite completo; no se recorta
+  texto conservando una cita que aparentaría corresponder a otro contenido.
+- El filtro opcional `seccion` se aplica antes de buscar candidatos, dentro del
+  workspace/documento/versión autorizados, también sobre índices existentes de #17.
+  `Chunk.seccion_id` distingue el ID del título visible. El chunker conserva
+  `seccion:N` (línea del encabezado original) en MD/TXT y `pagina:N` en PDF.
+  Una página es una ubicación, no un tema. Los encabezados repetidos tienen IDs
+  distintos. Un índice heredado de MD ambiguo exige reconstrucción para acotar
+  por sección; no se mezclan títulos iguales ni se adivinan sus límites.
+  La referencia conserva sus valores originales (página y sección), sin inventar títulos.
+- El llamador puede reducir presupuesto_tokens y exigir source_hash. El contexto
+  se revalida tras la consulta y durante selección; fallos/cuotas/cancelación se propagan.
+  Estas pruebas con Chroma nativo y embeddings simulados no acreditan Gemini real.

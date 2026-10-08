@@ -90,9 +90,9 @@ graph TD
 - El embedding de consulta también usa la interfaz síncrona y `ctx.llamar`; propagar el mismo contexto desde Researcher/chat/glosario, sin contadores ni reintentos independientes.
 
 **Criterios de aceptación**:
-- [ ] Una consulta sobre el doc demo VCN recupera chunks pertinentes con diversidad (no 5 copias del mismo párrafo).
-- [ ] La evidencia devuelta nunca excede el presupuesto de tokens.
-- [ ] Cada chunk recuperado trae metadatos suficientes para renderizar «Ver la fuente» (página/sección).
+- [x] Una consulta sobre el doc demo VCN recupera chunks pertinentes con diversidad (no 5 copias del mismo párrafo).
+- [x] La evidencia devuelta nunca excede el presupuesto de tokens.
+- [x] Cada chunk recuperado trae metadatos suficientes para renderizar «Ver la fuente» (página/sección).
 
 **Verificación**: `pytest backend/tests/test_retriever.py` + inspección manual de resultados sobre `Issue 05`.
 
