@@ -195,4 +195,9 @@ CATALOGO_EN: dict[str, str] = {
     "a11y.estado_trabajo": "Job status: {estado}",
     "a11y.resultado_quiz": "Answer {resultado}",
     "a11y.navegacion_teclado": "Use Tab to navigate and Enter to activate",
+    "onboarding.codigo_guardado": "I saved my code",
+    "onboarding.recuperado": "Your study workspace has been recovered.",
+    "onboarding.borrado_recibido": "Access to the previous workspace is blocked and its deletion is scheduled.",
+    "errors.INVALID_RESPONSE": "The server returned unexpected data. Try again; if it persists, share the request identifier.",
+    "errors.reintentar_en": "You can try again in {segundos} seconds.",
 }

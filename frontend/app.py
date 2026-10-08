@@ -1,6 +1,7 @@
 import pages.home as home
 import streamlit as st
 from api_client import APIClient, APIError
+from components.errors import mostrar_error_ui
 from components.session import inicializar_estado_sesion
 from components.sidebar import render_sidebar
 from components.theme import aplicar_tema
@@ -30,13 +31,7 @@ if not st.session_state.session_token and not st.session_state.mostrando_recuper
         # Renderizar estado de error inicial sin onboarding
         st.header(t("onboarding.bienvenida_titulo", idioma_actual))
 
-        titulo = t("errors.titulo", idioma_actual)
-        mensaje = t(f"errors.{e.code}", idioma_actual)
-        st.error(f"**{titulo}**: {mensaje}")
-
-        etiqueta_detalles = t("comun.detalles_tecnicos", idioma_actual)
-        with st.expander(etiqueta_detalles):
-            st.code(f"Code: {e.code}\nRequest-ID: {e.request_id or 'N/A'}")
+        mostrar_error_ui(e, idioma_actual)
 
         st.divider()
         if st.button(t("comun.reintentar", idioma_actual), type="primary"):

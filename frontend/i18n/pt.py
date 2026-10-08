@@ -195,4 +195,9 @@ CATALOGO_PT: dict[str, str] = {
     "a11y.estado_trabajo": "Status do trabalho: {estado}",
     "a11y.resultado_quiz": "Resposta {resultado}",
     "a11y.navegacion_teclado": "Use Tab para navegar e Enter para ativar",
+    "onboarding.codigo_guardado": "Já guardei meu código",
+    "onboarding.recuperado": "Pronto, seu espaço de estudo foi recuperado.",
+    "onboarding.borrado_recibido": "O acesso ao espaço anterior foi bloqueado e sua exclusão está agendada.",
+    "errors.INVALID_RESPONSE": "O servidor respondeu com dados inesperados. Tente novamente; se persistir, compartilhe o identificador da solicitação.",
+    "errors.reintentar_en": "Você pode tentar novamente em {segundos} segundos.",
 }

@@ -1,13 +1,10 @@
-import logging
-
 import streamlit as st
 from api_client import APIClient, APIError
 from i18n import CATALOGOS, t
 
+from components.errors import mostrar_error_ui
 from components.history import render_historial
-from components.session import limpiar_sesion_local, manejar_sesion_invalida
-
-logger = logging.getLogger(__name__)
+from components.session import limpiar_sesion_local
 
 
 def render_sidebar(api_client: APIClient, idioma_actual: str):
@@ -60,11 +57,11 @@ def _render_acciones_sesion(api_client: APIClient, idioma_actual: str):
         try:
             api_client.close_session(token)
         except APIError as e:
-            # Si el token ya expiró o el backend devolvió error, se registra la advertencia
-            # pero el estado local se limpia de todas formas para cerrar la sesión del cliente.
-            logger.warning("Fallo al revocar sesión en el backend durante logout: %s", e.code)
-        limpiar_sesion_local()
-        st.rerun()
+            mostrar_error_ui(e, idioma_actual)
+        else:
+            limpiar_sesion_local()
+            st.session_state.mostrando_recuperacion = True
+            st.rerun()
 
     with st.expander("⚙️ " + t("nav.configuracion", idioma_actual)):
         if st.button(t("onboarding.rotar_codigo", idioma_actual), use_container_width=True):
@@ -92,47 +89,44 @@ def _procesar_modal_pendiente(api_client: APIClient, idioma_actual: str):
         mensaje_modal = t("onboarding.borrar_confirmacion", idioma_actual)
 
     # Definición dinámica con título traducido
-    @st.dialog(titulo_modal)
+    @st.dialog(titulo_modal, dismissible=False)
     def _modal():
         st.warning(mensaje_modal)
         col_si, col_no = st.columns(2)
         with col_si:
             if st.button(t("comun.si", idioma_actual), type="primary", use_container_width=True):
                 if accion == "rotar":
-                    _ejecutar_rotacion(api_client, token, idioma_actual)
+                    exito = _ejecutar_rotacion(api_client, token, idioma_actual)
                 else:
-                    _ejecutar_borrado(api_client, token, idioma_actual)
-                st.session_state.accion_confirmar = None
-                st.rerun()
+                    exito = _ejecutar_borrado(api_client, token, idioma_actual)
+                if exito:
+                    st.session_state.accion_confirmar = None
+                    st.rerun()
         with col_no:
             if st.button(t("comun.no", idioma_actual), use_container_width=True):
                 st.session_state.accion_confirmar = None
                 st.rerun()
 
-    st.session_state.accion_confirmar = None
     _modal()
 
 
-def _ejecutar_rotacion(api_client: APIClient, token: str, idioma_actual: str):
+def _ejecutar_rotacion(api_client: APIClient, token: str, idioma_actual: str) -> bool:
     try:
         res = api_client.rotate_recovery_code(token)
         st.session_state.session_token = res["token"]
-        st.session_state.recovery_code = res.get("recovery_code")
+        st.session_state.recovery_code = res["recovery_code"]
+        return True
     except APIError as e:
-        _procesar_error(e, idioma_actual)
+        mostrar_error_ui(e, idioma_actual)
+        return False
 
 
-def _ejecutar_borrado(api_client: APIClient, token: str, idioma_actual: str):
+def _ejecutar_borrado(api_client: APIClient, token: str, idioma_actual: str) -> bool:
     try:
         api_client.delete_workspace(token)
         limpiar_sesion_local()
+        st.session_state.aviso_sesion = "onboarding.borrado_recibido"
+        return True
     except APIError as e:
-        _procesar_error(e, idioma_actual)
-
-
-def _procesar_error(e: APIError, idioma_actual: str):
-    """Redirige a la pantalla de recuperación si el token es inválido o muestra el error."""
-    if e.code == "SESSION_INVALID":
-        manejar_sesion_invalida()
-    else:
-        st.error(t(f"errors.{e.code}", idioma_actual))
+        mostrar_error_ui(e, idioma_actual)
+        return False

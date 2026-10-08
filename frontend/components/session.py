@@ -22,12 +22,11 @@ def inicializar_estado_sesion():
 
 def limpiar_sesion_local():
     """Limpia los tokens y datos de la sesión activa."""
-    st.session_state.session_token = None
-    st.session_state.workspace_id = None
-    st.session_state.recovery_code = None
-    st.session_state.mostrando_recuperacion = False
-    st.session_state.accion_confirmar = None
-    st.session_state.error_sesion_invalida = False
+    # Ningún documento, borrador o caché de otro espacio debe sobrevivir al cambio.
+    for clave in list(st.session_state):
+        if clave != "idioma_ui":
+            del st.session_state[clave]
+    inicializar_estado_sesion()
 
 
 def manejar_sesion_invalida():

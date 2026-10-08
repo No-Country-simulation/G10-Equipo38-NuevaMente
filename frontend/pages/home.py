@@ -1,34 +1,16 @@
 import streamlit as st
 from api_client import APIError
-from components.session import manejar_sesion_invalida
+from components.errors import mostrar_error_ui
+from components.session import limpiar_sesion_local
 from components.sidebar import render_sidebar
 from i18n import t
-
-
-def mostrar_error_ui(e: APIError, idioma_actual: str):
-    """Renderiza errores amigables y reacciona ante sesiones inválidas/expiradas."""
-    if e.code == "SESSION_INVALID" and not st.session_state.mostrando_recuperacion:
-        manejar_sesion_invalida()
-        st.rerun()
-        return
-
-    titulo = t("errors.titulo", idioma_actual)
-    clave_error = f"errors.{e.code}"
-    mensaje = t(clave_error, idioma_actual)
-
-    # Si la clave no existe en el catálogo, usa el mensaje de error interno
-    if mensaje == clave_error:
-        mensaje = t("errors.INTERNAL", idioma_actual)
-
-    st.error(f"**{titulo}**: {mensaje}")
-
-    with st.expander(t("comun.detalles_tecnicos", idioma_actual)):
-        st.code(f"Code: {e.code}\nRequest-ID: {e.request_id or 'N/A'}")
 
 
 def render(api_client, idioma_actual: str):
     # Renderizar panel lateral con controles
     render_sidebar(api_client, idioma_actual)
+    if aviso := st.session_state.pop("aviso_sesion", None):
+        st.success(t(aviso, idioma_actual))
     # --- Banner del código de recuperación
     _render_banner_recuperacion(idioma_actual)
     if st.session_state.get("mostrando_recuperacion"):
@@ -61,6 +43,9 @@ def _render_banner_recuperacion(idioma_actual: str):
             file_name="nuevamente_codigo_recuperacion.txt",
             mime="text/plain",
         )
+        if st.button(t("onboarding.codigo_guardado", idioma_actual)):
+            st.session_state.recovery_code = None
+            st.rerun()
 
 
 def _render_pantalla_recuperacion(api_client, idioma_actual: str):
@@ -73,22 +58,24 @@ def _render_pantalla_recuperacion(api_client, idioma_actual: str):
     st.subheader(t("onboarding.recuperar_titulo", idioma_actual))
     st.caption(t("onboarding.recuperar_ayuda", idioma_actual))
 
-    with st.form("form_recuperacion"):
+    with st.form("form_recuperacion", clear_on_submit=True):
         codigo_input = st.text_input(
             label=t("onboarding.recuperar_titulo", idioma_actual),
             placeholder="xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx",
+            type="password",
         )
         btn_submit = st.form_submit_button(t("onboarding.recuperar_boton", idioma_actual))
 
         if btn_submit:
             try:
                 res = api_client.recover_session(codigo_input.strip())
+                limpiar_sesion_local()
                 st.session_state.session_token = res["token"]
                 st.session_state.workspace_id = res["workspace_id"]
                 st.session_state.recovery_code = None
                 st.session_state.mostrando_recuperacion = False
                 st.session_state.error_sesion_invalida = False
-                st.success(t("upload.listo", idioma_actual))
+                st.session_state.aviso_sesion = "onboarding.recuperado"
                 st.rerun()
             except APIError as e:
                 mostrar_error_ui(e, idioma_actual)
