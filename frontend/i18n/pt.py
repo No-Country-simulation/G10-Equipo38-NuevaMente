@@ -21,6 +21,7 @@ CATALOGO_PT: dict[str, str] = {
     "comun.atras": "Voltar",
     "comun.siguiente": "Próximo",
     "comun.vacio": "Nada por aqui ainda.",
+    "comun.detalles_tecnicos": "Detalhes técnicos",
     # ------------------------- navegação -------------------------
     "nav.inicio": "Início",
     "nav.documentos": "Documentos",
@@ -42,6 +43,10 @@ CATALOGO_PT: dict[str, str] = {
     "onboarding.recuperar_ayuda": "Cole o código que você guardou ao criar o espaço.",
     "onboarding.recuperar_boton": "Entrar com meu código",
     "onboarding.demo": "Testar documento demo",
+    "onboarding.rotar_codigo": "Rotacionar código de recuperação",
+    "onboarding.rotar_confirmacion": "Esta ação revogará todas as sessões ativas, gerará uma nova sessão local e emitirá um novo código de recuperação. O código anterior deixará de funcionar. Deseja continuar?",
+    "onboarding.borrar_espacio": "Excluir espaço de trabalho",
+    "onboarding.borrar_confirmacion": "Esta ação é irreversível. Todos os documentos e materiais deste espaço serão excluídos.",
     # ------------------------- sidebar -------------------------
     "sidebar.titulo": "Parâmetros de adaptação",
     "sidebar.documento": "Documento de origem",
@@ -57,6 +62,7 @@ CATALOGO_PT: dict[str, str] = {
     "sidebar.generar": "Gerar material",
     "sidebar.generando": "Gerando…",
     "sidebar.idioma_ui": "Idioma da interface",
+    "sidebar.cerrar_sesion": "Encerrar sessão",
     # ------------------------- upload -------------------------
     "upload.titulo": "Enviar um documento",
     "upload.arrastrar": "Arraste aqui um PDF, Markdown ou TXT",
@@ -181,6 +187,7 @@ CATALOGO_PT: dict[str, str] = {
     "errors.INTERNAL": "Erro interno. Se persistir, informe o identificador da requisição.",
     "errors.STORAGE_UNAVAILABLE": "O armazenamento está indisponível agora.",
     "errors.PROVIDER_UNAVAILABLE": "O provedor de IA está indisponível agora.",
+    "errors.SERVICE_UNAVAILABLE": "O servidor está indisponível no momento. Verifique sua conexão ou tente novamente mais tarde.",
     # ------------------------- acessibilidade -------------------------
     "a11y.ir_al_contenido": "Ir para o conteúdo principal",
     "a11y.indicador_carga": "Carregando conteúdo, aguarde",
@@ -188,4 +195,9 @@ CATALOGO_PT: dict[str, str] = {
     "a11y.estado_trabajo": "Status do trabalho: {estado}",
     "a11y.resultado_quiz": "Resposta {resultado}",
     "a11y.navegacion_teclado": "Use Tab para navegar e Enter para ativar",
+    "onboarding.codigo_guardado": "Já guardei meu código",
+    "onboarding.recuperado": "Pronto, seu espaço de estudo foi recuperado.",
+    "onboarding.borrado_recibido": "O acesso ao espaço anterior foi bloqueado e sua exclusão está agendada.",
+    "errors.INVALID_RESPONSE": "O servidor respondeu com dados inesperados. Tente novamente; se persistir, compartilhe o identificador da solicitação.",
+    "errors.reintentar_en": "Você pode tentar novamente em {segundos} segundos.",
 }

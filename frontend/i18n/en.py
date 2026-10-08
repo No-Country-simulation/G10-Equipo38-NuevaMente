@@ -21,6 +21,7 @@ CATALOGO_EN: dict[str, str] = {
     "comun.atras": "Back",
     "comun.siguiente": "Next",
     "comun.vacio": "Nothing here yet.",
+    "comun.detalles_tecnicos": "Technical details",
     # ------------------------- navigation -------------------------
     "nav.inicio": "Home",
     "nav.documentos": "Documents",
@@ -42,6 +43,10 @@ CATALOGO_EN: dict[str, str] = {
     "onboarding.recuperar_ayuda": "Paste the code you saved when creating the space.",
     "onboarding.recuperar_boton": "Sign in with my code",
     "onboarding.demo": "Try demo document",
+    "onboarding.rotar_codigo": "Rotate recovery code",
+    "onboarding.rotar_confirmacion": "This action will revoke all active sessions, generate a new local session, and issue a new recovery code. The previous code will no longer work. Do you want to continue?",
+    "onboarding.borrar_espacio": "Delete workspace",
+    "onboarding.borrar_confirmacion": "This action is irreversible. All documents and study materials in this workspace will be deleted.",
     # ------------------------- sidebar -------------------------
     "sidebar.titulo": "Adaptation parameters",
     "sidebar.documento": "Source document",
@@ -57,6 +62,7 @@ CATALOGO_EN: dict[str, str] = {
     "sidebar.generar": "Generate material",
     "sidebar.generando": "Generating…",
     "sidebar.idioma_ui": "Interface language",
+    "sidebar.cerrar_sesion": "Log out",
     # ------------------------- upload -------------------------
     "upload.titulo": "Upload a document",
     "upload.arrastrar": "Drop a PDF, Markdown or TXT file here",
@@ -181,6 +187,7 @@ CATALOGO_EN: dict[str, str] = {
     "errors.INTERNAL": "Internal error. If it persists, report the request identifier.",
     "errors.STORAGE_UNAVAILABLE": "Storage is unavailable right now.",
     "errors.PROVIDER_UNAVAILABLE": "The AI provider is unavailable right now.",
+    "errors.SERVICE_UNAVAILABLE": "The server is unavailable at the moment. Please check your connection or try again later.",
     # ------------------------- accessibility -------------------------
     "a11y.ir_al_contenido": "Skip to main content",
     "a11y.indicador_carga": "Loading content, please wait",
@@ -188,4 +195,9 @@ CATALOGO_EN: dict[str, str] = {
     "a11y.estado_trabajo": "Job status: {estado}",
     "a11y.resultado_quiz": "Answer {resultado}",
     "a11y.navegacion_teclado": "Use Tab to navigate and Enter to activate",
+    "onboarding.codigo_guardado": "I saved my code",
+    "onboarding.recuperado": "Your study workspace has been recovered.",
+    "onboarding.borrado_recibido": "Access to the previous workspace is blocked and its deletion is scheduled.",
+    "errors.INVALID_RESPONSE": "The server returned unexpected data. Try again; if it persists, share the request identifier.",
+    "errors.reintentar_en": "You can try again in {segundos} seconds.",
 }

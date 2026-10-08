@@ -16,7 +16,9 @@ COPY i18n/ ./i18n/
 COPY pages/ ./pages/
 
 COPY .streamlit/ .streamlit/
+COPY api_client.py .
 COPY app.py entrypoint.py ./
+
 ENV HOME=/tmp \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
     STREAMLIT_SERVER_HEADLESS=true \

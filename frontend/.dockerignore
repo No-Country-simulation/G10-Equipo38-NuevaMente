@@ -2,6 +2,7 @@
 !Dockerfile
 !requirements.txt
 !app.py
+!api_client.py
 !entrypoint.py
 !components/
 !components/**
