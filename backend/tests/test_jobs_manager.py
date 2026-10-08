@@ -159,6 +159,53 @@ def test_retry_after_no_se_recorta(store):
         gestor.detener()
 
 
+@pytest.mark.parametrize("deadline", [10.1, 30.0])
+def test_espera_despierta_antes_sin_adelantar_retry_ni_consumir_cuota(monkeypatch, deadline):
+    from unittest.mock import Mock
+
+    from app.jobs.manager import DeadlineExcedidoError
+
+    reloj = [10.0]
+    monkeypatch.setattr("app.jobs.manager.time.monotonic", lambda: reloj[0])
+    evento = Mock()
+    evento.is_set.return_value = False
+
+    def esperar(tiempo):
+        reloj[0] += tiempo / 2 if evento.wait.call_count == 1 else tiempo + 0.001
+        return False
+
+    evento.wait.side_effect = esperar
+    cuotas = CuotasProveedor({"m": CuotasModelo(rpd=3)})
+    ctx = ContextoEjecucion("j", "w", "chat", deadline, cuotas=cuotas, _evento_cancelacion=evento)
+    intentos = []
+
+    def solicitar(*, timeout):
+        intentos.append(reloj[0])
+        if len(intentos) == 1:
+            raise ReintentableError("esperar", retry_after=10)
+        return "ok"
+
+    if deadline < 20:
+        with pytest.raises(DeadlineExcedidoError):
+            ctx.llamar(solicitar, modelo="m")
+        assert len(intentos) == 1 and cuotas.disponibles_hoy("m") == 2
+    else:
+        assert ctx.llamar(solicitar, modelo="m") == "ok"
+        assert len(intentos) == 2 and intentos[1] >= 20 and cuotas.disponibles_hoy("m") == 1
+    assert evento.wait.call_count == 2
+
+
+def test_deadline_exacto_no_envia_solicitud_ni_reserva_cuota(monkeypatch):
+    from app.jobs.manager import DeadlineExcedidoError
+
+    monkeypatch.setattr("app.jobs.manager.time.monotonic", lambda: 10.0)
+    cuotas = CuotasProveedor({"m": CuotasModelo(rpd=3)})
+    ctx = ContextoEjecucion("j", "w", "chat", 10.0, cuotas=cuotas)
+    with pytest.raises(DeadlineExcedidoError):
+        ctx.llamar(lambda timeout: pytest.fail("No debe llamar al proveedor"), modelo="m")
+    assert cuotas.disponibles_hoy("m") == 3
+
+
 def test_llamadas_reciben_timeout_y_reservan_cuota():
     cuotas = CuotasProveedor({"m": CuotasModelo(rpd=1)})
     ctx = ContextoEjecucion("job", "ws", "chat", time.monotonic() + 30, timeout_por_llamada=0.2, cuotas=cuotas)

@@ -261,7 +261,7 @@ class ContextoEjecucion:
         """Helper para usar entre pasos: levanta la excepción que corresponde."""
         if self.cancelado() or not self.espacio_vigente():
             raise TrabajoCanceladoError()
-        if time.monotonic() > self.deadline:
+        if time.monotonic() >= self.deadline:
             raise DeadlineExcedidoError()
 
     def llamar(
@@ -307,8 +307,15 @@ class ContextoEjecucion:
                 pausa = max(
                     self.base_backoff_segundos * 2**intento * random.uniform(0.75, 1.25), error.retry_after or 0
                 )
-                self._evento_cancelacion.wait(min(pausa, max(0, self.deadline - time.monotonic())))
+                fin_espera = min(self.deadline, time.monotonic() + pausa)
+                while (restante := fin_espera - time.monotonic()) > 0:
+                    self._evento_cancelacion.wait(restante)
+                    self.chequear()
                 self.chequear()
+                # Una espera puede despertar antes (reloj/resolución del SO).
+                # Nunca reenviar antes de Retry-After ni al alcanzar el deadline.
+                if fin_espera >= self.deadline:
+                    raise DeadlineExcedidoError()
                 self.registrar_reintento()
 
 
