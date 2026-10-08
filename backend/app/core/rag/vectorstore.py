@@ -289,6 +289,9 @@ class VectorStoreChroma:
         coleccion.delete(
             where={"$and": [*_filtro(workspace_id, document_id)["$and"], {"version_indice": {"$ne": version}}]}
         )
+        contexto.chequear()
+        if self._retirado(workspace_id, document_id):
+            raise TrabajoCanceladoError()
         return ResultadoIndexacion(document_id, len(chunks), vectores is not None)
 
     def borrar(self, workspace_id: str, document_id: str, *, contexto: ContextoEjecucion) -> None:

@@ -478,3 +478,18 @@ def test_fallo_limpieza_no_oculta_error_original(pila, monkeypatch):
         indice.indexar("espacio-a", "doc-a", chunks(), contexto=ctx())
     assert "invisibles" in error.value.__notes__[0]
     assert indice.contar("espacio-a", "doc-a", contexto=ctx()) == 0
+
+
+def test_cancelacion_durante_limpieza_final_no_declara_exito(pila, monkeypatch):
+    indice, _ = pila
+    contexto = ctx()
+    original = type(indice._privada).delete
+
+    def cancelar(coleccion, **kwargs):
+        resultado = original(coleccion, **kwargs)
+        contexto._evento_cancelacion.set()
+        return resultado
+
+    monkeypatch.setattr(type(indice._privada), "delete", cancelar)
+    with pytest.raises(TrabajoCanceladoError):
+        indice.indexar("espacio-a", "doc-a", chunks(), contexto=contexto)
