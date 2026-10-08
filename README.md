@@ -179,7 +179,7 @@ Inspirado en la interfaz de Linear (`awesome-design-md`):
 
 ## ⚙️ Estructura del Repositorio y Ejecución
 
-Monorepo con dos servicios esqueleto (sección 15 de `decisiones_proyecto.md`): `backend/` (FastAPI, paquete `app`) y `frontend/` (Streamlit). Flujo Git: `main` protegida (solo PRs) ← `develop` (integración) ← `feature/<nombre>`.
+Monorepo con dos servicios (sección 15 de `decisiones_proyecto.md`): `backend/` (FastAPI, paquete `app`) y `frontend/` (Streamlit). Flujo Git: `main` protegida (solo PRs) ← `develop` (integración) ← `feature/<nombre>`.
 
 ```bash
 # 1. Clonar y crear entorno virtual (Python 3.11)
@@ -205,11 +205,14 @@ ruff check .
 ruff format --check .
 pytest
 
-# 6. Compose preliminar (esqueleto; endurecimiento con el issue #26)
-docker compose build
+# 6. Compose: arrancar API/UI con el .env configurado
+docker compose up --build --detach --wait --wait-timeout 120
 ```
 
 ---
+
+Para el arranque Docker sin credenciales, usá `.env.docker.example`; pasos,
+persistencia y verificación ARM64 en [docs/docker.md](docs/docker.md).
 
 ## Segmentación de documentos (issue #12)
 

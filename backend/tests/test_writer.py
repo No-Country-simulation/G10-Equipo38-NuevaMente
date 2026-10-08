@@ -372,10 +372,18 @@ def test_sdk_real_con_transporte_simulado_no_anade_retries(entorno):
 
 
 @pytest.mark.parametrize("diaria", [False, True])
-def test_sdk_429_retry_after_y_cuota_diaria(entorno, diaria):
+def test_sdk_429_retry_after_y_cuota_diaria(entorno, diaria, monkeypatch):
     estado = estado_inicial(entorno)
     solicitudes, pausas = [], []
-    entorno[0].grafo.ejecucion._evento_cancelacion.wait = lambda segundos: pausas.append(segundos)
+    reloj = [time.monotonic()]
+    monkeypatch.setattr("app.jobs.manager.time.monotonic", lambda: reloj[0])
+
+    def esperar(segundos):
+        pausas.append(segundos)
+        reloj[0] += segundos
+        return False
+
+    entorno[0].grafo.ejecucion._evento_cancelacion.wait = esperar
 
     def handler(request):
         solicitudes.append(request)

@@ -73,6 +73,8 @@
   "evaluacion_pedagogica": null,
   "afirmaciones_fallidas": [],
   "feedback": [],
+  "destino_revision": null,
+  "solicitudes_evidencia": [],
   "intento": 0,
   "presupuesto": {
     "limite": 20,

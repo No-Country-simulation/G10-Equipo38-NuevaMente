@@ -124,6 +124,8 @@ class EstadoGrafo(ContratoGrafo):
     evaluacion_pedagogica: EvaluacionCalidad | None = None
     afirmaciones_fallidas: list[Juicio] = Field(default_factory=list)
     feedback: list[str] = Field(default_factory=list)
+    destino_revision: Literal["writer", "researcher", "finalizer"] | None = None
+    solicitudes_evidencia: list[str] = Field(default_factory=list)
     intento: int = Field(default=0, ge=0, le=3)
     presupuesto: PresupuestoLlamadas = Field(default_factory=PresupuestoLlamadas)
     deadline: float = Field(gt=0)

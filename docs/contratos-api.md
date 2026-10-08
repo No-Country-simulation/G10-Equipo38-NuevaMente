@@ -405,7 +405,7 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
 - `core/agents/prompts.py` compone Writer/Critic para los cuatro perfiles, cinco
   formatos, cuatro nichos y tres idiomas desde matrices comunes; el detalle es
   independiente del perfil. `cargar_plantilla(GenerateRequest)` entrega los dos
-  roles y `prompt_version=nm-prompts-1.0.0`, sin usar proveedores.
+  roles y `prompt_version=nm-prompts-1.1.0`, sin usar proveedores.
 - `preparar_prompts(..., workspace_id, source_hash, idioma_origen, evidencia)`
   separa `system_instruction` de `datos_json`. Documento, consultas, feedback y
   borrador nunca se interpolan en el sistema. Rechaza evidencia vacía, ajena,
@@ -422,9 +422,10 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
 - `PromptsGeneracion.registrar_trazabilidad(Trazabilidad)` devuelve una copia
   con la versión utilizada, que los consumidores conservan en el paquete
   canónico. No almacena prompts completos ni cambia el contrato HTTP v1.
-- Issues 23/28/29 conectarán estas plantillas con Writer/Critic y `ctx.llamar`;
-  el juez visual recibirá la imagen original. Las instrucciones reducen riesgo
-  de injection, pero no sustituyen autorización, validación ni evaluación.
+- Writer y Critic (issues 23/28) usan estas plantillas con `ctx.llamar`. Issue 29
+  conectará las aristas; Issue 30 suministrará imágenes originales al juez visual.
+  Las instrucciones reducen riesgo de injection, pero no sustituyen autorización,
+  validación ni evaluación.
   Evidencia automatizada: `backend/tests/test_prompts.py`; los ejemplos requieren
   revisión de pares al revisar el PR.
 
@@ -438,7 +439,7 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
   evidencia ajena/antigua, cambios de fuente, citas inventadas y ubicaciones falsas.
   Completa ubicaciones omitidas desde el chunk autorizado, sin agregar hechos nuevos.
   Metadatos deben coincidir con perfil, formato, nicho, detalle, idiomas y alcance;
-  no se puede inventar cobertura. Critic revisará su respaldo factual y pedagógico.
+  no se puede inventar cobertura. Critic revisa su respaldo factual y pedagógico.
 - Parseo JSON estricto, sin cercas Markdown, claves duplicadas ni valores no finitos.
   Una corrección de estructura/citas consume otra redacción del contador global, hasta
   tres contando las revisiones previas de Critic. Al agotarlas sin borrador válido:
@@ -460,6 +461,41 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
   del update. La integración de estados terminales con el registro, las aristas y los
   consumidores finales pertenece a Issue 29. Pruebas: `backend/tests/test_writer.py`,
   con doble y transporte HTTP simulado del SDK; no acreditan Gemini/OCI reales.
+
+### Critic (Issue 28)
+
+- `critic(EstadoGrafo, DependenciasCritic)` revisa el borrador tipado y sus metadatos;
+  reutiliza la validación de Writer para alcance y citas canónicas. Revalida ownership,
+  hash y disponibilidad documental antes/después de cada llamada y entre reintentos.
+  No modifica el contenido ni persiste ni marca `completed`.
+- Separa extracción de afirmaciones, juicios factuales y rúbrica pedagógica. La extracción
+  no recibe evidencia que pueda sesgarla a omitir errores. El backend asigna IDs y exige
+  ubicaciones reales, un juicio por afirmación y referencias autorizadas para cada juicio.
+  Calcula score/conteos con Faithfulness; el modelo no puede emitir score ni aprobación.
+- Aplica las tres bandas de §19.3 y todos los bloqueos de §16.4: una afirmación sin respaldo,
+  una contradicción, evaluación incompleta, cobertura parcial o visión insuficiente impiden
+  aprobar aunque el promedio sea alto. Una dimensión `baja` bloquea; `media` conserva la
+  semántica del contrato existente. Una extracción vacía es `no_evaluable`, con score nulo.
+- Entrega afirmaciones fallidas con texto, ubicación, motivo y referencias a Writer. Si falta
+  contexto, emite `solicitudes_evidencia` para Researcher. Los campos internos añadidos
+  `destino_revision` y `solicitudes_evidencia` tienen defaults y no cambian HTTP v1.
+  Una aprobación indica `finalizer`; Issue 29 conectará estos destinos con las aristas.
+  Tras la tercera redacción no aprobada: `rejected_quality`, sin borrador ni evaluaciones.
+- Quiz: excluye distractores del promedio factual y revisa todas las opciones en una solicitud
+  separada. Exige una única respuesta defendible en el contexto del enunciado y explicación
+  que refute las incorrectas; IDs ausentes/duplicados o citas inválidas son fallo técnico.
+- El loader visual recibe workspace/documento/hash/chunk y devuelve `ImagenOriginal` con
+  esos identificadores, bytes, MIME y reserva de tokens. Critic comprueba esa procedencia
+  y adjunta la imagen original al SDK. Sin original/loader o con revisión insuficiente no
+  aprueba; no reutiliza una aprobación visual anterior. La obtención/rasterización real
+  corresponde a Issue 30: aquí se implementan contrato, transporte y pruebas con doble.
+- Jueces textuales/visuales usan el modelo de verificación configurado y transporte síncrono
+  de `ClienteGeminiGeneracion`, siempre mediante `ctx.llamar`. Cada intento reserva TPM,
+  cuota y presupuesto; el SDK mantiene un intento, sin otros bucles. Cancelación, deadline,
+  cuota, respuesta inválida o indisponibilidad eliminan borrador y score del update terminal.
+  El doble conserva entradas async y comparte lógica/contadores con las nuevas sync.
+- Evidencia: `backend/tests/test_critic.py`, junto con Writer, Supervisor, prompts y Faithfulness.
+  Son pruebas con dobles/SDK simulado; no acreditan ejecuciones Gemini/OCI reales.
 
 ### Integración interna del registro y el ejecutor
 
