@@ -87,6 +87,7 @@ graph TD
 - [ ] Un trabajo marcado `running` al matar el proceso queda `failed` al reiniciar.
 
 **Verificación**: `pytest backend/tests/test_jobs_store.py` (incluye test de reinicio simulado).
+La reconstrucción ante pérdida de volumen y las lápidas durables se verifican además en `backend/tests/test_workspace_recovery.py`, con storage explícitamente simulado. Índices, visión y UI de progreso mantienen sus issues respectivos.
 
 ---
 
@@ -106,6 +107,7 @@ graph TD
 
 - Persistir rotación/revocación con control de versión; devolver código y token nuevos. Índice privado hash→workspace reconstruible desde manifiestos, sin recorrer el bucket por intento.
 - Limitar creación y recuperación globalmente y por origen confiable. Actualizar actividad/expiración con escrituras agrupadas; espacios vencidos o borrados no se recuperan.
+- Precisiones implementadas en contratos-api.md: reserva de intentos en vuelo, origen autenticado por Caddy, actividad cada cinco minutos, sincronización de manifiestos y recuperación al arrancar. Regresiones: `test_access_regressions.py` y `test_workspace_recovery.py`.
 
 **Criterios de aceptación**:
 - [ ] Crear → cerrar sesión → recuperar con código → ver los mismos recursos, funciona.

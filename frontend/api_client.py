@@ -69,12 +69,25 @@ class APIError(Exception):
 class APIClient:
     """Cliente HTTP dedicado para consumir la API de FastAPI (contratos v1)."""
 
-    def __init__(self, base_url: str | None = None, timeout: tuple[float, float] = DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: tuple[float, float] = DEFAULT_TIMEOUT,
+        *,
+        idioma_ui: str = "es",
+        origen_headers: dict[str, str] | None = None,
+    ):
         self.base_url = (base_url or os.getenv("API_URL", API_URL)).rstrip("/")
         self.timeout = timeout
+        self.idioma_ui = idioma_ui if idioma_ui in ("es", "en", "pt") else "es"
+        self.origen_headers = {
+            k: v
+            for k, v in (origen_headers or {}).items()
+            if k in ("X-NuevaMente-Client-IP", "X-NuevaMente-Origin-Key")
+        }
 
     def _headers(self, token: Optional[str] = None) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept-Language": self.idioma_ui, **self.origen_headers}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return headers

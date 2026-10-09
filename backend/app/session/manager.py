@@ -1,11 +1,14 @@
-import json
+import logging
 import secrets
 import uuid
 
 from app.jobs.store import RegistroOperativo, _hash_de
 from app.schemas.errors import ErrorAplicacion, ErrorCode
 from app.schemas.responses import SessionResponse, WorkspaceCreatedResponse
-from app.storage.provider import StorageProvider
+from app.session.manifests import sincronizar_manifiesto
+from app.storage.provider import StorageConflict, StorageError, StorageProvider
+
+logger = logging.getLogger("nuevamente.session")
 
 
 class SessionManager:
@@ -58,18 +61,19 @@ class SessionManager:
                 )
                 token_sesion = self.__generar_token_sesion(workspace_id)
                 # Actualizar el manifiesto en la Nube (OCI Object Storage)
-                # No se hace uso del if_match, ya que primero se aplica en la base de datos y ahi ya se tiene en cuenta
-                # la versión actual del workspace (UPDATE ..... WHERE version_manifiesto = ? )
                 self.__subir_manifest_oci(workspace_id, codigo_recuperacion, expira_en, nueva_version_manifiesto)
                 return SessionResponse(workspace_id=workspace_id, token=token_sesion)
-        except ValueError as e:
+        except (StorageConflict, ValueError):
             raise ErrorAplicacion(
-                code=ErrorCode.SESSION_INVALID,
-                message=f"Error al recuperar la sesión: {str(e)}",
-            )
+                code=ErrorCode.INVALID_STATE,
+                message="El espacio cambió durante la recuperación; volver a intentarlo.",
+            ) from None
 
-    def obtener_sesion(self, token: str) -> dict:
-        return self.db.obtener_sesion(token)
+    def obtener_sesion(self, token: str) -> dict | None:
+        sesion = self.db.obtener_sesion(token)
+        if sesion is not None:
+            self.db.registrar_actividad(sesion["workspace_id"], self.workspace_retention_days)
+        return sesion
 
     def revocar_sesion(self, token: str) -> None:
         self.db.revocar_sesion(token)
@@ -102,19 +106,22 @@ class SessionManager:
                 )
 
                 # Actualizar el manifiesto en la Nube (OCI Object Storage)
-                # No se hace uso del if_match, ya que primero se aplica en la base de datos y ahi ya se tiene en cuenta
-                # la versión actual del workspace (UPDATE workspaces .... WHERE workspace_id = ? AND version_manifiesto = ? )
                 self.__subir_manifest_oci(workspace_id, nuevo_codigo_recuperacion, expira_en, nueva_version)
-        except ValueError as e:
+        except (StorageConflict, ValueError):
             raise ErrorAplicacion(
                 code=ErrorCode.INVALID_STATE,
-                message=f"Error al rotar las credenciales: {str(e)}",
-            )
+                message="El espacio cambió durante la rotación; volver a intentarlo.",
+            ) from None
 
         return nuevo_codigo_recuperacion, nuevo_token
 
     def borrar_workspace(self, workspace_id: str) -> None:
         self.db.borrar_workspace(workspace_id)
+        try:
+            sincronizar_manifiesto(self.db, self.storage_provider, workspace_id)
+        except (StorageError, ValueError):
+            # El acceso ya está bloqueado y la marca durable local queda para sincronizar.
+            logger.warning("Borrado pendiente de confirmar en storage; workspace_id=%s", workspace_id)
 
     def __generar_token_sesion(self, workspace_id: str) -> str:
         # Token de sesión opaco (32 bytes = 256 bits)
@@ -136,13 +143,7 @@ class SessionManager:
         version: int = 1,
         if_match: str | None = None,
     ) -> None:
-        manifest = {
-            "workspace_id": workspace_id,
-            "codigo_hash": _hash_de(codigo_recuperacion),
-            "version": version,
-            "expira_en": expira_en,
-        }
-
-        ruta_oci = f"workspaces/{workspace_id}/manifest.json"
-
-        self.storage_provider.upload(ruta_oci, json.dumps(manifest).encode("utf-8"), if_match=if_match)
+        workspace = self.db.workspace_para_manifest(workspace_id)
+        if workspace is None or workspace["codigo_hash"] != _hash_de(codigo_recuperacion):
+            raise ValueError("Manifiesto sin identidad operativa válida")
+        sincronizar_manifiesto(self.db, self.storage_provider, workspace_id)

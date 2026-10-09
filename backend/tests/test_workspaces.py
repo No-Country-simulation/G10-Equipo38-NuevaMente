@@ -139,7 +139,6 @@ def test_fallo_oci_en_rotacion_mantiene_credenciales_anteriores(cliente):
     """
     # 1. Crear espacio inicial
     resp_creacion = cliente.post("/api/workspaces")
-    print(resp_creacion.text)
     assert resp_creacion.status_code == 201
     datos = resp_creacion.json()
     token_original = datos["token"]

@@ -70,6 +70,26 @@ Los `code` son estables y no se traducen; los `message` se localizan según idio
 | `POST /api/workspaces/current/recovery-code` | Rota el código (revoca sesiones previas) y devuelve el código nuevo una sola vez, junto con un token nuevo. |
 | `DELETE /api/workspaces/current` | Bloquea el acceso y agenda el borrado físico de recursos. |
 
+#### Precisiones de acceso, actividad y reconstrucción
+
+- La recuperación reserva como máximo cinco plazas por origen, contando fallos del último minuto e intentos en vuelo. Un código válido no borra los fallos previos del minuto. Los fallos técnicos liberan su plaza; un conflicto de versión devuelve `409 INVALID_STATE`. Un bloqueo devuelve `429 RECOVERY_LOCKED` con `Retry-After`.
+- La actividad autenticada renueva la retención del espacio con escrituras agrupadas cada cinco minutos. No prolonga el token. Los manifiestos pendientes se sincronizan al arrancar y cada minuto; la confirmación de una versión vieja no borra una actividad posterior.
+- El manifiesto privado conserva hash, versión, expiración, última actividad y lápidas. Las escrituras usan creación exclusiva o `if_match`; un manifiesto retirado no se reactiva. Si OCI falla al borrar, el acceso local queda bloqueado y la confirmación durable permanece pendiente, con diagnóstico y reintento. Se debe preservar SQLite hasta confirmar esa lápida: un borrado que nunca llegó a storage no puede reconstruirse después de perder también el volumen local.
+- `session/recovery.py` reconstruye el índice hash→espacio al arrancar un registro nuevo y retoma reconstrucciones interrumpidas. Pagina manifiestos, verifica identidad/ETag/hash y restaura documentos, registros de paquetes canónicos aprobados y el agregado privado de progreso; omite recursos retirados. No restaura tokens, colas, borradores ni invoca Gemini. Los documentos quedan `processing` hasta reconstruir índices (#17) y, cuando corresponda, visión (#30). Los endpoints y presentación de progreso siguen a cargo de #41/#42.
+- `Accept-Language` selecciona mensajes ES/EN/PT; los códigos, detalles e idioma del contenido conservan su contrato. El cliente Streamlit envía el idioma de interfaz vigente.
+
+**Origen detrás de Streamlit/Caddy**: producción requiere `TRUSTED_ORIGIN_SECRET`, aleatorio, de al menos 32 caracteres, compartido solamente por Caddy y backend. El proxy sobrescribe `X-NuevaMente-Client-IP` con la IP de conexión y `X-NuevaMente-Origin-Key` con esa clave. Streamlit transmite ambas cabeceras al backend desde su contexto del servidor. La API autentica la clave antes de usar el origen; rechaza cabeceras incompletas/falsificadas e ignora `X-Forwarded-For` aportado por el cliente. Sin esas cabeceras usa la IP de conexión directa (desarrollo/API directa).
+
+En cada `reverse_proxy` de UI y API del despliegue #49, incorporar:
+
+```caddyfile
+header_up X-NuevaMente-Client-IP {remote_host}
+header_up X-NuevaMente-Origin-Key {env.TRUSTED_ORIGIN_SECRET}
+header_down -X-NuevaMente-Origin-Key
+```
+
+Esto supone Caddy como entrada pública directa, según la arquitectura vigente. Si se incorpora otro proxy anterior, su cadena de confianza debe definirse explícitamente. La clave nunca se envía al navegador ni se registra. Referencias: [cabeceras de Caddy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#headers) y [placeholders](https://caddyserver.com/docs/caddyfile/concepts#placeholders). La configuración documentada debe verificarse en el despliegue real; las pruebas locales no acreditan OCI/Caddy públicos.
+
 ### Documentos (issues `Issue 19`, `Issue 11`)
 
 | Método y ruta | Descripción |
@@ -655,3 +675,38 @@ Estos ajustes de contrato deben conservar la revisión API/UI/AGT/RAG y la etiqu
 - El llamador puede reducir presupuesto_tokens y exigir source_hash. El contexto
   se revalida tras la consulta y durante selección; fallos/cuotas/cancelación se propagan.
   Estas pruebas con Chroma nativo y embeddings simulados no acreditan Gemini real.
+
+
+### Researcher y cobertura (Issue 27, contrato interno)
+
+- `VectorStoreChroma.listar_chunks(..., contexto, source_hash)` devuelve el
+  inventario privado de la versión autorizada, sin consumir Gemini. Comprueba
+  hash, procedencia, lápidas, cancelación y cambios del índice durante la lectura.
+- `DependenciasResearcher` inyecta DependenciasGrafo, RetrieverMMR y la versión
+  del parser registrada por la ingestión. No se infiere esa versión desde el
+  código instalado ni se serializan clientes en EstadoGrafo.
+- `researcher` deriva el índice de secciones desde Chunk.seccion_id; exige que
+  el registro preparado por Supervisor enumere los mismos IDs. Encabezados
+  repetidos son secciones diferentes. `pagina:N` solo delimita ubicación de PDF,
+  sin afirmar que una página sea un tema. El lector documental de Issue 19 debe
+  usar estos mismos IDs al enumerar alcances.
+- Planifica búsquedas deterministas con el título como datos y el foco de
+  perfil/formato en el idioma de origen. La consulta registrada en cada evidencia
+  indica ese foco de uso. No interpreta instrucciones del documento ni llama
+  al LLM para redactar consultas. Las búsquedas conservan ContextoEjecucion.
+- Prioriza un fragmento por sección solicitada; luego completa con diversidad.
+  **Una sola unión deduplicada** comparte el máximo de 12.000 tokens por borrador,
+  contado sobre JSON real. Cada consulta recibe el presupuesto restante. No se
+  otorgan 12.000 tokens independientes a cada sección ni se confía en contadores
+  de tokens aportados por un proveedor de retrieval.
+- Una consulta sin cobertura puede ampliarse una vez. Las solicitudes de Critic
+  se atienden antes de extras opcionales, reutilizando evidencia vigente y los
+  contadores de redacciones/LLM; embeddings mantienen sus propias cuotas por modelo.
+- Cobertura insuficiente o presupuesto incompatible producen rejected_quality
+  con las secciones faltantes y la opción de acotar. Fallos de proveedor/cuota,
+  índice inconsistente, fuente modificada, deadline o cancelación son técnicos.
+  El update terminal elimina evidencia y borradores; nunca implica aprobación.
+- Publica secciones_cubiertas y trazabilidad para Writer sin completar el grafo
+  ni persistir. Issue 29 integrará el nodo y sus aristas terminales. Las pruebas
+  usan Chroma nativo y dobles explícitos; el caso PDF VCN simula metadata ready
+  solo para aislar el nodo y no acredita visión completada, OCI ni Gemini reales.

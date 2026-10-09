@@ -126,6 +126,7 @@ class Configuracion(BaseSettings):
     # obtiene con la propiedad `origenes_cors`.
     # ------------------------------------------------------------------
     cors_origins: str = ""
+    trusted_origin_secret: str = Field(default="", repr=False)
 
     @property
     def origenes_cors(self) -> list[str]:
@@ -181,6 +182,10 @@ class Configuracion(BaseSettings):
             # para entrega real.
             return
 
+        if len(self.trusted_origin_secret) < 32 or self.trusted_origin_secret == "placeholder":
+            problemas.append(
+                "TRUSTED_ORIGIN_SECRET requiere un secreto aleatorio de al menos 32 caracteres para el proxy"
+            )
         if self.google_api_key.strip() in ("", "placeholder"):
             problemas.append("GOOGLE_API_KEY no esta configurada (queda 'placeholder')")
         if not self.oci_always_free_confirmed:

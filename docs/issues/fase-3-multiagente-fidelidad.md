@@ -63,9 +63,9 @@ graph TD
 - Propagar el contexto a cada consulta de Issue 18. Si se usa Gemini para formular consultas, sus solicitudes también pasan por `ctx.llamar` y cuentan en el presupuesto de generación; la formulación determinista no consume llamadas.
 
 **Criterios de aceptación**:
-- [ ] Para el doc VCN con alcance completo, el estado lista evidencia de todas las secciones principales (cobertura reportada).
-- [ ] Alcance de una sección específica recupera solo evidencia de esa sección.
-- [ ] Presupuesto excedido → diagnóstico claro en el estado (secciones sin caber), no recorte invisible.
+- [x] Para el doc VCN con alcance completo, el estado lista evidencia de todas las secciones principales (cobertura reportada).
+- [x] Alcance de una sección específica recupera solo evidencia de esa sección.
+- [x] Presupuesto excedido → diagnóstico claro en el estado (secciones sin caber), no recorte invisible.
 
 **Verificación**: `pytest backend/tests/test_researcher.py` con doble de retrieval.
 

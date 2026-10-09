@@ -48,7 +48,7 @@ class DocumentoReconstruido(BaseModel):
     reutilizado: bool
 
 
-def _workspace_vigente(storage: StorageProvider, contexto: ContextoEjecucion) -> None:
+def _workspace_vigente(storage: StorageProvider, contexto: ContextoEjecucion, document_id: str | None = None) -> dict:
     contexto.chequear()
     try:
         manifest = json.loads(storage.get(clave_workspace(contexto.workspace_id)))
@@ -59,8 +59,14 @@ def _workspace_vigente(storage: StorageProvider, contexto: ContextoEjecucion) ->
     expiracion = datetime.fromisoformat(manifest["expira_en"])
     if expiracion.tzinfo is None:
         raise ValueError("La expiración debe incluir zona horaria")
-    if manifest.get("borrado") or expiracion <= datetime.now(timezone.utc):
+    if manifest.get("borrado") or manifest.get("borrado_en") or expiracion <= datetime.now(timezone.utc):
         raise TrabajoCanceladoError()
+    if document_id is not None and any(
+        item.get("recurso_tipo") == "document" and item.get("recurso_id") == document_id
+        for item in manifest.get("recursos_borrados", [])
+    ):
+        raise TrabajoCanceladoError()
+    return manifest
 
 
 def _reconstruir(
@@ -78,7 +84,7 @@ def _reconstruir(
     while True:
         contexto.chequear()
         if not demo:
-            _workspace_vigente(storage, contexto)
+            workspace_manifest = _workspace_vigente(storage, contexto)
         pagina = storage.list(prefijo, limit=tamano_pagina, cursor=cursor)
         for objeto in pagina.items:
             partes = objeto.object_name.split("/")
@@ -93,7 +99,11 @@ def _reconstruir(
                 raise ValueError("Manifiesto ajeno, duplicado o con clave no canónica")
             vistos.add(document_id)
             coleccion = indice._demo if demo else indice._privada
-            if manifest.borrado:
+            retirado = not demo and any(
+                item.get("recurso_tipo") == "document" and item.get("recurso_id") == document_id
+                for item in workspace_manifest.get("recursos_borrados", [])
+            )
+            if manifest.borrado or retirado:
                 indice._borrar(coleccion, workspace_id, document_id)
                 continue
             if indice._retirado(workspace_id, document_id):
@@ -116,10 +126,10 @@ def _reconstruir(
                 )
             ]
 
-            def confirmar(clave=objeto.object_name, etag=objeto.etag):
+            def confirmar(clave=objeto.object_name, etag=objeto.etag, doc_id=document_id):
                 contexto.chequear()
                 if not demo:
-                    _workspace_vigente(storage, contexto)
+                    _workspace_vigente(storage, contexto, doc_id)
                 # Si cambió/borró el manifiesto durante Gemini no se publica.
                 storage.get(clave, if_match=etag)
 

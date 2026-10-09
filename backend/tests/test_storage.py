@@ -200,6 +200,8 @@ def test_factory_mock_oci_1_devuelve_mock(tmp_path, monkeypatch):
 
 def test_factory_mock_oci_0_sin_credenciales_falla_visible(tmp_path, monkeypatch):
     """Criterios 2 y 3: error de arranque accionable, nunca un mock silencioso."""
+    # La prueba negativa debe verificar ausencia real de dotenv y credenciales.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MOCK_OCI", "0")
     for variable in VARIABLES_REQUERIDAS_REAL:
         monkeypatch.delenv(variable, raising=False)
