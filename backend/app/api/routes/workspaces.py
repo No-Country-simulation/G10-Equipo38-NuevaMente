@@ -3,11 +3,8 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from app.api.deps import get_sesion_actual, get_session_manager, get_workspace_actual
 from app.api.security import (
     RateLimiter,
-    limpiar_intentos_fallidos,
-    registrar_intento_fallido,
-    validar_intentos_fallidos,
+    intento_recuperacion,
 )
-from app.schemas.errors import ErrorAplicacion, ErrorCode
 from app.schemas.requests import RecoverSessionRequest
 from app.schemas.responses import RotatedCodeResponse, SessionResponse, WorkspaceCreatedResponse
 from app.session.manager import SessionManager
@@ -48,18 +45,8 @@ def recover_workspace(
     Devuelve una sola vez el workspace_id, el código de recuperación
     (≥128 bits, agrupado) y el token de sesión.
     """
-    ip_cliente = validar_intentos_fallidos(request)
-
-    try:
-        # Aca se valida si el código de recuperación es correcto
-        respuesta = manager.recuperar_sesion(recovery_request.recovery_code)
-        limpiar_intentos_fallidos(ip_cliente)
-        return respuesta
-    except ErrorAplicacion as e:
-        # Se registra el fallo si el código fue rechazado
-        if e.error.code == ErrorCode.SESSION_INVALID:
-            registrar_intento_fallido(ip_cliente)
-        raise e
+    with intento_recuperacion(request):
+        return manager.recuperar_sesion(recovery_request.recovery_code)
 
 
 @router.delete(

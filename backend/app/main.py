@@ -46,11 +46,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.error_i18n import mensaje_localizado
 from app.api.routes import jobs, workspaces
 from app.config import Configuracion, config
 from app.jobs.manager import ControlesOperativos, GestorTrabajos
 from app.jobs.store import RegistroOperativo
 from app.schemas.errors import ErrorAplicacion, ErrorBody, ErrorCode, ErrorResponse
+from app.session.manifests import SincronizadorManifiestos, sincronizar_pendientes
+from app.session.recovery import restaurar_registro
 from app.storage.oci_storage import get_storage_provider
 from app.storage.provider import StorageUnavailable
 
@@ -79,14 +82,16 @@ _MAPEO_HTTP_A_CODIGO: dict[int, ErrorCode] = {
 }
 
 
-def _envoltorio(codigo: ErrorCode, mensaje: str, request_id: str, detalles: dict | None = None) -> dict:
+def _envoltorio(
+    codigo: ErrorCode, mensaje: str, request_id: str, detalles: dict | None = None, *, request: Request | None = None
+) -> dict:
     """Arma el cuerpo de error del contrato (§7.3) como dict serializable.
 
     Forma exacta: {"error": {"code", "message", "details"}, "request_id"}.
     Se usa dict en vez del modelo para no filtrar campos de más por accidente.
     """
     return ErrorResponse(
-        error=ErrorBody(code=codigo, message=mensaje, details=detalles),
+        error=ErrorBody(code=codigo, message=mensaje_localizado(codigo, mensaje, request), details=detalles),
         request_id=request_id,
     ).model_dump()
 
@@ -119,17 +124,28 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        controles = ControlesOperativos(
-            max_en_cola=ajustes.max_queued_jobs,
-            deadline_ejecucion_segundos=ajustes.generation_deadline_seconds,
-        )
-        gestor = GestorTrabajos(app.state.db, controles=controles)
-        app.state.jobs_manager = gestor
+        gestor = None
+        sincronizador = None
         try:
+            restaurar_registro(app.state.db, app.state.storage_provider)
+            sincronizar_pendientes(app.state.db, app.state.storage_provider)
+            sincronizador = SincronizadorManifiestos(app.state.db, app.state.storage_provider)
+            sincronizador.iniciar()
+            controles = ControlesOperativos(
+                max_en_cola=ajustes.max_queued_jobs,
+                deadline_ejecucion_segundos=ajustes.generation_deadline_seconds,
+            )
+            gestor = GestorTrabajos(app.state.db, controles=controles)
+            app.state.jobs_manager = gestor
             yield
         finally:
-            # No cerrar SQLite si todavía hay una llamada en vuelo.
-            gestor.detener()
+            # Esperar llamadas en vuelo antes de cerrar el registro compartido.
+            try:
+                if gestor is not None:
+                    gestor.detener()
+            finally:
+                if sincronizador is not None:
+                    sincronizador.detener()
             cerrar_storage = getattr(app.state.storage_provider, "cerrar", None)
             if callable(cerrar_storage):
                 cerrar_storage()
@@ -191,7 +207,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
             allow_credentials=False,
             allow_methods=["GET", "POST", "DELETE"],
             allow_headers=["Authorization", "Content-Type", CABECERA_REQUEST_ID, "Idempotency-Key", "Last-Event-ID"],
-            expose_headers=[CABECERA_REQUEST_ID],
+            expose_headers=[CABECERA_REQUEST_ID, "Retry-After"],
         )
 
     # ------------------------- Handlers de excepción -------------------------
@@ -205,6 +221,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
                 ErrorCode.STORAGE_UNAVAILABLE,
                 "El almacenamiento no está disponible; revisar OCI y su presupuesto.",
                 request_id,
+                request=request,
             ),
             headers={CABECERA_REQUEST_ID: request_id},
         )
@@ -214,8 +231,8 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         request_id = _request_id_de(request)
         return JSONResponse(
             status_code=exc.status_code,
-            content=_envoltorio(exc.error.code, exc.error.message, request_id, exc.error.details),
-            headers={CABECERA_REQUEST_ID: request_id},
+            content=_envoltorio(exc.error.code, exc.error.message, request_id, exc.error.details, request=request),
+            headers={**exc.headers, CABECERA_REQUEST_ID: request_id},
         )
 
     @app.exception_handler(RequestValidationError)
@@ -235,6 +252,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
                 request_id,
                 # No devolver input (puede contener secretos) ni ctx (incluye excepciones no serializables).
                 detalles={"errores": [{k: e[k] for k in ("loc", "msg", "type")} for e in exc.errors()]},
+                request=request,
             ),
             headers={CABECERA_REQUEST_ID: request_id},
         )
@@ -246,7 +264,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
         codigo = _MAPEO_HTTP_A_CODIGO.get(exc.status_code, ErrorCode.INTERNAL)
         return JSONResponse(
             status_code=exc.status_code,
-            content=_envoltorio(codigo, str(exc.detail), request_id),
+            content=_envoltorio(codigo, str(exc.detail), request_id, request=request),
             headers={**(exc.headers or {}), CABECERA_REQUEST_ID: request_id},
         )
 
@@ -268,6 +286,7 @@ def crear_app(configuracion: Configuracion | None = None) -> FastAPI:
                 ErrorCode.INTERNAL,
                 "Error interno del servidor. Reportar el request_id al equipo.",
                 request_id,
+                request=request,
             ),
             # Este handler corre FUERA del middleware request_id, así que la
             # cabecera de trazabilidad la agrega él mismo.

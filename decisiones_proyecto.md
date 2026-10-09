@@ -595,6 +595,8 @@ La recuperación persiste en un manifiesto privado de OCI con hash, workspace_id
 La base operativa mantiene los hashes de tokens y el estado de revocación.
 Toda lectura/escritura comprueba ownership desde la sesión validada, nunca desde un workspace_id arbitrario del cliente.
 Se limitan creación y recuperación por origen confiable y globalmente; un X-Forwarded-For aportado por el cliente no decide el límite.
+Caddy sobrescribe la IP de conexión y autentica su origen con `TRUSTED_ORIGIN_SECRET`, compartido con el backend; Streamlit transmite esa información desde el servidor. La clave no llega al navegador ni a logs. Los intentos en vuelo también reservan las cinco plazas de recuperación.
+La actividad se registra agrupada cada cinco minutos y los manifiestos pendientes se sincronizan cada minuto y al arrancar, sin extender tokens. Una lápida pendiente de confirmación en OCI exige conservar el registro local hasta sincronizarla; no se promete reconstruir un cambio que nunca llegó a storage después de perder también SQLite.
 
 **Por qué**: permite retomar el aprendizaje sin registro, con un mecanismo real de acceso.
 No es identidad corporativa ni ofrece roles, SSO o administración organizacional.
@@ -1566,6 +1568,7 @@ APP_ENV=production
 API_HOST=0.0.0.0
 API_PORT=8000
 API_URL=http://backend:8000
+TRUSTED_ORIGIN_SECRET=placeholder  # >=32 caracteres aleatorios; mismo valor en Caddy/backend
 DATA_DIR=/app/.data
 
 # Decisiones operativas iniciales

@@ -1,5 +1,8 @@
+import secrets
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from ipaddress import ip_address
 
 from fastapi import Request
 
@@ -14,6 +17,7 @@ _peticiones_globales: dict[str, list[datetime]] = {}
 _peticiones_ip: dict[str, list[datetime]] = {}
 # Estructura: { "ip": [timestamps] } (Solo para fallos de recuperación)
 _intentos_fallidos_ip: dict[str, list[datetime]] = {}
+_intentos_en_curso: dict[str, int] = {}
 
 
 def _contar_eventos_recientes(registro: list[datetime], ventana_minutos: int = 1) -> int:
@@ -24,6 +28,18 @@ def _contar_eventos_recientes(registro: list[datetime], ventana_minutos: int = 1
 
 
 def _obtener_ip(request: Request) -> str:
+    origen = request.headers.get("X-NuevaMente-Client-IP")
+    clave = request.headers.get("X-NuevaMente-Origin-Key")
+    if origen is not None or clave is not None:
+        config = getattr(request.app.state, "config", None)
+        secreto = getattr(config, "trusted_origin_secret", "")
+        if not secreto or not clave or not secrets.compare_digest(clave.encode("utf-8"), secreto.encode("utf-8")):
+            raise ErrorAplicacion(ErrorCode.INVALID_REQUEST, "Origen de cliente no autenticado.")
+        try:
+            return str(ip_address(origen))
+        except (ValueError, TypeError):
+            raise ErrorAplicacion(ErrorCode.INVALID_REQUEST, "Origen de cliente inválido.") from None
+    # X-Forwarded-For del usuario no cambia el límite.
     return request.client.host if request.client else "unknown"
 
 
@@ -83,10 +99,11 @@ def validar_intentos_fallidos(request: Request) -> str:
 
         _intentos_fallidos_ip.setdefault(ip_cliente, [])
 
-        if _contar_eventos_recientes(_intentos_fallidos_ip[ip_cliente]) >= 5:
+        if _contar_eventos_recientes(_intentos_fallidos_ip[ip_cliente]) + _intentos_en_curso.get(ip_cliente, 0) >= 5:
             raise ErrorAplicacion(
                 code=ErrorCode.RECOVERY_LOCKED,
                 message="Se ha alcanzado el límite de intentos fallidos, bloqueo temporal de 1 minuto aplicado.",
+                headers={"Retry-After": "60"},
             )
 
     return ip_cliente
@@ -98,6 +115,25 @@ def registrar_intento_fallido(ip: str) -> None:
 
 
 def limpiar_intentos_fallidos(ip: str) -> None:
-    """Limpia los intentos fallidos de una IP tras un canje exitoso."""
+    """Reinicialización explícita del registro; un canje no borra fallos previos."""
     with _lock:
         _intentos_fallidos_ip.pop(ip, None)
+
+
+@contextmanager
+def intento_recuperacion(request: Request):
+    """Reserva un intento: fallos e intentos en vuelo comparten las cinco plazas."""
+    with _lock:
+        ip = validar_intentos_fallidos(request)
+        _intentos_en_curso[ip] = _intentos_en_curso.get(ip, 0) + 1
+    try:
+        yield ip
+    except ErrorAplicacion as error:
+        if error.error.code == ErrorCode.SESSION_INVALID:
+            registrar_intento_fallido(ip)
+        raise
+    finally:
+        with _lock:
+            _intentos_en_curso[ip] -= 1
+            if not _intentos_en_curso[ip]:
+                del _intentos_en_curso[ip]

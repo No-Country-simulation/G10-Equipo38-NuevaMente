@@ -223,6 +223,7 @@ def test_pdf_demo_solo_diagrama_requiere_vision(documento_demo_vcn):
 
 def test_factory_usa_configuracion_del_archivo(tmp_path, monkeypatch):
     monkeypatch.delenv("MOCK_OCI", raising=False)
+    monkeypatch.delenv("DATA_DIR", raising=False)
     archivo = tmp_path / "config.env"
     archivo.write_text(f"MOCK_OCI=true\nDATA_DIR={tmp_path.as_posix()}\n")
     ajustes = Configuracion(_env_file=archivo)

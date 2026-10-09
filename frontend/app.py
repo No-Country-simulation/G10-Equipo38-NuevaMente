@@ -12,10 +12,15 @@ aplicar_tema()
 
 st.markdown('<style>[data-testid="stSidebarNav"] {display: none;}</style>', unsafe_allow_html=True)
 
-api = APIClient()
-
 inicializar_estado_sesion()
 idioma_actual = st.session_state.idioma_ui
+# Caddy sobrescribe estas dos cabeceras; el backend autentica su clave.
+origen_headers = {
+    nombre: st.context.headers[nombre]
+    for nombre in ("X-NuevaMente-Client-IP", "X-NuevaMente-Origin-Key")
+    if nombre in st.context.headers
+}
+api = APIClient(idioma_ui=idioma_actual, origen_headers=origen_headers)
 
 # Creación automática de espacio anónimo
 if not st.session_state.session_token and not st.session_state.mostrando_recuperacion:

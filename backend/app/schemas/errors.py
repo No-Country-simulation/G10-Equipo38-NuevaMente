@@ -123,7 +123,10 @@ HTTP_POR_CODIGO = {
 class ErrorAplicacion(Exception):
     """Error público de dominio; mensaje/detalles seguros, sin texto crudo del proveedor."""
 
-    def __init__(self, code: ErrorCode, message: str, details: dict | None = None):
+    def __init__(
+        self, code: ErrorCode, message: str, details: dict | None = None, *, headers: dict[str, str] | None = None
+    ):
         super().__init__(message)
         self.error = ErrorBody(code=code, message=message, details=details)
         self.status_code = HTTP_POR_CODIGO[self.error.code]
+        self.headers = headers or {}

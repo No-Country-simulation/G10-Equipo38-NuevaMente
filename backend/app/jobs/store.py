@@ -40,11 +40,10 @@ Decisiones de diseño que el issue manda y este código cumple:
    no vuelve a aparecer ni puede "resucitarse" aunque una reconstrucción
    desde OCI traiga sus manifiestos.
 
-Límite honesto de alcance: si se PIERDE el volumen completo, este archivo
-desaparece con él. La reconstrucción desde los manifiestos de OCI (con
-tombstones DURABLES allá) es la parte que cierra el issue #14/#9; este
-store expone lo que esa reconstrucción necesitará (invalidación de
-sesiones por espacio, consulta de lápidas) pero no habla con OCI.
+Si se pierde el volumen, session/recovery.py restaura el registro desde
+manifiestos privados confirmados sin recuperar sesiones. La sincronización
+de actividad y lápidas pertenece a session/manifests.py; este store
+conserva las marcas pendientes y no llama a OCI.
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ from app.schemas.enums import DocumentStatus, JobStatus
 # Versión actual del esquema. Cada cambio de esquema agrega una entrada a
 # MIGRACIONES y sube este número; NUNCA se edita una migración ya aplicada
 # (las bases reales de los usuarios quedaron con la vieja).
-VERSION_ESQUEMA = 4
+VERSION_ESQUEMA = 5
 
 # Cada migración: (versión, SQL). Se aplican en orden ascendente dentro de
 # una transacción cada una. La v1 crea todas las tablas del issue #08.
@@ -207,6 +206,22 @@ MIGRACIONES: list[tuple[int, str]] = [
         CREATE INDEX idx_workspaces_codigo_hash ON workspaces(codigo_hash);
         """,
     ),
+    (
+        5,
+        """
+        ALTER TABLE workspaces ADD COLUMN ultima_actividad_en TEXT;
+        ALTER TABLE workspaces ADD COLUMN manifest_pendiente INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE pending_deletes ADD COLUMN manifest_confirmado_en TEXT;
+        CREATE TABLE workspace_progress (
+            workspace_id TEXT PRIMARY KEY REFERENCES workspaces(workspace_id),
+            version INTEGER NOT NULL CHECK (version > 0),
+            state_json TEXT NOT NULL,
+            actualizado_en TEXT NOT NULL
+        );
+        CREATE TABLE recovery_state (id INTEGER PRIMARY KEY CHECK (id = 1), pendiente INTEGER NOT NULL);
+        INSERT INTO recovery_state VALUES (1, CASE WHEN EXISTS(SELECT 1 FROM workspaces) THEN 0 ELSE 1 END);
+        """,
+    ),
 ]
 
 
@@ -267,9 +282,9 @@ class RegistroOperativo:
     retención se pasan por parámetro (el default de producción sale de la
     configuración: DATA_DIR + retención de 30 días del Apéndice A).
 
-    Thread-safety: el lock serializa las ESCRITURAS dentro del proceso
-    (FastAPI atiende pedidos en varios hilos). Las lecturas van por la
-    misma conexión y son seguras bajo WAL. EN UN SOLO PROCESO: dos procesos
+    Thread-safety: el lock serializa lecturas y escrituras sobre la conexión
+    compartida (FastAPI atiende pedidos en varios hilos). WAL no aísla
+    transacciones entre hilos de esa misma conexión. EN UN SOLO PROCESO: dos procesos
     sobre la misma base violan el modelo de §14.2 y no está soportado.
     """
 
@@ -390,10 +405,10 @@ class RegistroOperativo:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO workspaces (workspace_id, codigo_hash, codigo_creado_en, expira_en)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO workspaces (workspace_id, codigo_hash, codigo_creado_en, expira_en, ultima_actividad_en)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), expira_en),
+                (workspace_id, _hash_de(codigo_recuperacion), _iso(ahora), expira_en, _iso(ahora)),
             )
         return (workspace_id, expira_en)
 
@@ -432,7 +447,9 @@ class RegistroOperativo:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 self._conn.execute(
-                    "UPDATE workspaces SET borrado_en = ? WHERE workspace_id = ? AND borrado_en IS NULL",
+                    """UPDATE workspaces SET borrado_en = ?, manifest_pendiente = 1,
+                       version_manifiesto = version_manifiesto + 1
+                       WHERE workspace_id = ? AND borrado_en IS NULL""",
                     (_iso(_ahora()), workspace_id),
                 )
                 self.revocar_sesiones_de_workspace(workspace_id)
@@ -457,25 +474,26 @@ class RegistroOperativo:
         transacción y procede a ejecutar la rotación de credenciales mediante el método privado `__ejecutar_rotacion_transaccional`.
         Devuelve el ID del workspace y la nueva fecha de expiración.
         """
-        if self._conn.in_transaction:
-            return self.__ejecutar_rotacion_transaccional(
-                workspace_id,
-                nuevo_codigo_recuperacion,
-                nuevo_token,
-                nueva_version,
-                dias_validez_ws,
-                horas_validez_sesion,
-            )
+        with self._lock:
+            if self._conn.in_transaction:
+                return self.__ejecutar_rotacion_transaccional(
+                    workspace_id,
+                    nuevo_codigo_recuperacion,
+                    nuevo_token,
+                    nueva_version,
+                    dias_validez_ws,
+                    horas_validez_sesion,
+                )
 
-        with self.transaccion():
-            return self.__ejecutar_rotacion_transaccional(
-                workspace_id,
-                nuevo_codigo_recuperacion,
-                nuevo_token,
-                nueva_version,
-                dias_validez_ws,
-                horas_validez_sesion,
-            )
+            with self.transaccion():
+                return self.__ejecutar_rotacion_transaccional(
+                    workspace_id,
+                    nuevo_codigo_recuperacion,
+                    nuevo_token,
+                    nueva_version,
+                    dias_validez_ws,
+                    horas_validez_sesion,
+                )
 
     def __ejecutar_rotacion_transaccional(
         self,
@@ -502,15 +520,18 @@ class RegistroOperativo:
             UPDATE workspaces 
             SET codigo_hash = ?, 
                 expira_en = ?, 
-                version_manifiesto = ?
-            WHERE workspace_id = ? AND version_manifiesto = ? 
+                version_manifiesto = ?, ultima_actividad_en = ?
+            WHERE workspace_id = ? AND version_manifiesto = ?
+                AND borrado_en IS NULL AND expira_en > ?
             """,
             (
                 _hash_de(nuevo_codigo_recuperacion),
                 expira_en,
                 nueva_version,
+                _iso(_ahora()),
                 workspace_id,
                 nueva_version - 1,
+                _iso(_ahora()),
             ),
         )
 
@@ -533,11 +554,11 @@ class RegistroOperativo:
         cursor = self._conn.execute(
             """
                 UPDATE workspaces
-                SET expira_en = ?, version_manifiesto = ?
+                SET expira_en = ?, version_manifiesto = ?, ultima_actividad_en = ?
                 WHERE workspace_id = ? AND borrado_en IS NULL AND expira_en > ?
                 AND version_manifiesto = ? 
             """,
-            (expira_en, nueva_version, workspace_id, _iso(ahora), nueva_version - 1),
+            (expira_en, nueva_version, _iso(ahora), workspace_id, _iso(ahora), nueva_version - 1),
         )
 
         if cursor.rowcount == 0:
@@ -1077,14 +1098,19 @@ class RegistroOperativo:
     def agendar_borrado(self, recurso_tipo: str, recurso_id: str, workspace_id: str) -> None:
         """Deja una lápida persistente; purga_despues_en indica elegibilidad para limpieza.
 
-        Las lápidas viven EN ESTA BASE (y en los manifiestos OCI cuando #14
-        llegue): su trabajo es evitar que un borrado se "deshaga" por
+        Las lápidas viven en esta base y se sincronizan al manifiesto OCI
+        mediante session/manifests.py: evitan que un borrado se "deshaga" por
         accidente — p. ej. una reconstrucción desde manifiestos que todavía
         menciona el recurso (§11.5: "el manifiesto de borrado pendiente
         evita recuperar recursos que el usuario ya retiró").
         """
         ahora = _ahora()
         with self._lock:
+            if recurso_tipo != "workspace":
+                self._conn.execute(
+                    "UPDATE workspaces SET manifest_pendiente = 1, version_manifiesto = version_manifiesto + 1 WHERE workspace_id = ?",
+                    (workspace_id,),
+                )
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO pending_deletes (recurso_tipo, recurso_id, workspace_id, solicitado_en, purga_despues_en)
@@ -1098,6 +1124,128 @@ class RegistroOperativo:
                     _iso(ahora + timedelta(days=self.dias_retencion)),
                 ),
             )
+
+    @_sincronizado
+    def workspace_para_manifest(self, workspace_id: str) -> dict | None:
+        """Incluye espacios retirados: solo para sincronización/recuperación interna."""
+        fila = self._conn.execute("SELECT * FROM workspaces WHERE workspace_id = ?", (workspace_id,)).fetchone()
+        return dict(fila) if fila else None
+
+    @_sincronizado
+    def registrar_actividad(self, workspace_id: str, dias_validez: int, intervalo_segundos: int = 300) -> bool:
+        workspace = self.obtener_workspace(workspace_id)
+        if workspace is None:
+            return False
+        ahora = _ahora()
+        ultima = (
+            datetime.fromisoformat(workspace["ultima_actividad_en"])
+            if workspace["ultima_actividad_en"]
+            else datetime.fromisoformat(workspace["expira_en"]) - timedelta(days=dias_validez)
+        )
+        if (ahora - ultima).total_seconds() < intervalo_segundos:
+            return False
+        self._conn.execute(
+            """UPDATE workspaces SET ultima_actividad_en = ?, expira_en = ?, manifest_pendiente = 1,
+               version_manifiesto = version_manifiesto + 1 WHERE workspace_id = ? AND borrado_en IS NULL""",
+            (_iso(ahora), _iso(ahora + timedelta(days=dias_validez)), workspace_id),
+        )
+        return True
+
+    @_sincronizado
+    def listar_manifiestos_pendientes(self) -> list[str]:
+        return [
+            fila[0]
+            for fila in self._conn.execute(
+                "SELECT workspace_id FROM workspaces WHERE manifest_pendiente = 1 ORDER BY workspace_id"
+            ).fetchall()
+        ]
+
+    @_sincronizado
+    def confirmar_manifiesto(self, workspace_id: str, version: int) -> None:
+        cursor = self._conn.execute(
+            "UPDATE workspaces SET manifest_pendiente = 0 WHERE workspace_id = ? AND version_manifiesto = ?",
+            (workspace_id, version),
+        )
+        if cursor.rowcount:
+            self._conn.execute(
+                "UPDATE pending_deletes SET manifest_confirmado_en = ? WHERE workspace_id = ?",
+                (_iso(_ahora()), workspace_id),
+            )
+
+    @_sincronizado
+    def listar_borrados(self, workspace_id: str) -> list[dict]:
+        return [
+            dict(fila)
+            for fila in self._conn.execute(
+                "SELECT recurso_tipo, recurso_id, solicitado_en, purga_despues_en FROM pending_deletes WHERE workspace_id = ?",
+                (workspace_id,),
+            ).fetchall()
+        ]
+
+    @_sincronizado
+    def registro_vacio(self) -> bool:
+        return self._conn.execute("SELECT 1 FROM workspaces LIMIT 1").fetchone() is None
+
+    @_sincronizado
+    def restaurar_workspace(self, datos: dict) -> bool:
+        workspace_id = datos["workspace_id"]
+        if self.workspace_para_manifest(workspace_id) is not None:
+            return False
+        if self._conn.execute("SELECT 1 FROM workspaces WHERE codigo_hash = ?", (datos["codigo_hash"],)).fetchone():
+            raise ValueError("Hash de recuperación compartido por espacios diferentes")
+        self._conn.execute(
+            """INSERT INTO workspaces (workspace_id, codigo_hash, codigo_creado_en, expira_en,
+               borrado_en, version_manifiesto, ultima_actividad_en) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                workspace_id,
+                datos["codigo_hash"],
+                _iso(_ahora()),
+                datos["expira_en"],
+                datos.get("borrado_en"),
+                datos["version"],
+                datos.get("ultima_actividad_en"),
+            ),
+        )
+        return True
+
+    @_sincronizado
+    def recuperacion_pendiente(self) -> bool:
+        return bool(self._conn.execute("SELECT pendiente FROM recovery_state WHERE id = 1").fetchone()[0])
+
+    @_sincronizado
+    def confirmar_recuperacion(self) -> None:
+        self._conn.execute("UPDATE recovery_state SET pendiente = 0 WHERE id = 1")
+
+    @_sincronizado
+    def restaurar_lapida(
+        self, workspace_id: str, tipo: str, recurso_id: str, solicitado_en: str, purga_despues_en: str
+    ) -> None:
+        self._conn.execute(
+            """INSERT OR IGNORE INTO pending_deletes
+               (recurso_tipo, recurso_id, workspace_id, solicitado_en, purga_despues_en, manifest_confirmado_en)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (tipo, recurso_id, workspace_id, solicitado_en, purga_despues_en, _iso(_ahora())),
+        )
+
+    @_sincronizado
+    def guardar_progreso_restaurado(self, workspace_id: str, state: dict) -> None:
+        _validar_respuesta_cacheada(state)
+        version = state.get("version")
+        if type(version) is not int or version < 1:
+            raise ValueError("Progreso sin versión válida")
+        self._conn.execute(
+            "INSERT INTO workspace_progress VALUES (?, ?, ?, ?)",
+            (workspace_id, version, json.dumps(state, ensure_ascii=False, allow_nan=False), _iso(_ahora())),
+        )
+
+    @_sincronizado
+    def obtener_progreso_restaurado(self, workspace_id: str) -> dict | None:
+        if self.obtener_workspace(workspace_id) is None:
+            return None
+        fila = self._conn.execute(
+            "SELECT state_json FROM workspace_progress WHERE workspace_id = ?", (workspace_id,)
+        ).fetchone()
+        return json.loads(fila[0]) if fila else None
 
     @_sincronizado
     def esta_borrado(self, recurso_tipo: str, recurso_id: str) -> bool:

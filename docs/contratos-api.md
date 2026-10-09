@@ -70,6 +70,26 @@ Los `code` son estables y no se traducen; los `message` se localizan según idio
 | `POST /api/workspaces/current/recovery-code` | Rota el código (revoca sesiones previas) y devuelve el código nuevo una sola vez, junto con un token nuevo. |
 | `DELETE /api/workspaces/current` | Bloquea el acceso y agenda el borrado físico de recursos. |
 
+#### Precisiones de acceso, actividad y reconstrucción
+
+- La recuperación reserva como máximo cinco plazas por origen, contando fallos del último minuto e intentos en vuelo. Un código válido no borra los fallos previos del minuto. Los fallos técnicos liberan su plaza; un conflicto de versión devuelve `409 INVALID_STATE`. Un bloqueo devuelve `429 RECOVERY_LOCKED` con `Retry-After`.
+- La actividad autenticada renueva la retención del espacio con escrituras agrupadas cada cinco minutos. No prolonga el token. Los manifiestos pendientes se sincronizan al arrancar y cada minuto; la confirmación de una versión vieja no borra una actividad posterior.
+- El manifiesto privado conserva hash, versión, expiración, última actividad y lápidas. Las escrituras usan creación exclusiva o `if_match`; un manifiesto retirado no se reactiva. Si OCI falla al borrar, el acceso local queda bloqueado y la confirmación durable permanece pendiente, con diagnóstico y reintento. Se debe preservar SQLite hasta confirmar esa lápida: un borrado que nunca llegó a storage no puede reconstruirse después de perder también el volumen local.
+- `session/recovery.py` reconstruye el índice hash→espacio al arrancar un registro nuevo y retoma reconstrucciones interrumpidas. Pagina manifiestos, verifica identidad/ETag/hash y restaura documentos, registros de paquetes canónicos aprobados y el agregado privado de progreso; omite recursos retirados. No restaura tokens, colas, borradores ni invoca Gemini. Los documentos quedan `processing` hasta reconstruir índices (#17) y, cuando corresponda, visión (#30). Los endpoints y presentación de progreso siguen a cargo de #41/#42.
+- `Accept-Language` selecciona mensajes ES/EN/PT; los códigos, detalles e idioma del contenido conservan su contrato. El cliente Streamlit envía el idioma de interfaz vigente.
+
+**Origen detrás de Streamlit/Caddy**: producción requiere `TRUSTED_ORIGIN_SECRET`, aleatorio, de al menos 32 caracteres, compartido solamente por Caddy y backend. El proxy sobrescribe `X-NuevaMente-Client-IP` con la IP de conexión y `X-NuevaMente-Origin-Key` con esa clave. Streamlit transmite ambas cabeceras al backend desde su contexto del servidor. La API autentica la clave antes de usar el origen; rechaza cabeceras incompletas/falsificadas e ignora `X-Forwarded-For` aportado por el cliente. Sin esas cabeceras usa la IP de conexión directa (desarrollo/API directa).
+
+En cada `reverse_proxy` de UI y API del despliegue #49, incorporar:
+
+```caddyfile
+header_up X-NuevaMente-Client-IP {remote_host}
+header_up X-NuevaMente-Origin-Key {env.TRUSTED_ORIGIN_SECRET}
+header_down -X-NuevaMente-Origin-Key
+```
+
+Esto supone Caddy como entrada pública directa, según la arquitectura vigente. Si se incorpora otro proxy anterior, su cadena de confianza debe definirse explícitamente. La clave nunca se envía al navegador ni se registra. Referencias: [cabeceras de Caddy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#headers) y [placeholders](https://caddyserver.com/docs/caddyfile/concepts#placeholders). La configuración documentada debe verificarse en el despliegue real; las pruebas locales no acreditan OCI/Caddy públicos.
+
 ### Documentos (issues `Issue 19`, `Issue 11`)
 
 | Método y ruta | Descripción |

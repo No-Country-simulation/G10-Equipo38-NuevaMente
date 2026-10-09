@@ -493,3 +493,16 @@ def test_cancelacion_durante_limpieza_final_no_declara_exito(pila, monkeypatch):
     monkeypatch.setattr(type(indice._privada), "delete", cancelar)
     with pytest.raises(TrabajoCanceladoError):
         indice.indexar("espacio-a", "doc-a", chunks(), contexto=contexto)
+
+
+def test_lapida_de_documento_en_workspace_impide_reconstruccion(pila, mock_storage):
+    indice, doble = pila
+    guardar_fuente(mock_storage)
+    key = clave_workspace("espacio-a")
+    manifest = json.loads(mock_storage.get(key))
+    manifest["recursos_borrados"] = [{"recurso_tipo": "document", "recurso_id": "doc-a"}]
+    mock_storage.upload(key, json.dumps(manifest))
+    assert reconstruir_workspace(mock_storage, indice, contexto=ctx()) == []
+    assert indice.contar("espacio-a", "doc-a", contexto=ctx()) == 0
+
+    assert doble.llamadas_embeddings == 0
