@@ -1,0 +1,162 @@
+{
+  "dataset_id": "nm-pedagogical-eval60",
+  "dataset_version": "1.1.0",
+  "state": "pendiente",
+  "sample_planned": 12,
+  "sample_comparable": 0,
+  "reviewers": [],
+  "provenance": [],
+  "annotations": [],
+  "confusion_matrix": {},
+  "agreement": null,
+  "mean_ratings": {
+    "claridad": null,
+    "adecuacion_perfil": null,
+    "cobertura": null,
+    "utilidad": null
+  },
+  "false_approvals_initial": [],
+  "false_rejections_initial": [],
+  "false_approvals_resolved": [],
+  "false_approvals_unresolved": [],
+  "disagreements": [],
+  "adjudications": [],
+  "corrections": [],
+  "cases": [
+    {
+      "case_id": "es-principiante",
+      "language": "es",
+      "profile": "principiante",
+      "format": "flashcards",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "es-junior-ssr",
+      "language": "es",
+      "profile": "junior_ssr",
+      "format": "tutorial",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "es-lider-tecnico",
+      "language": "es",
+      "profile": "lider_tecnico",
+      "format": "quiz",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "es-ejecutivo",
+      "language": "es",
+      "profile": "ejecutivo",
+      "format": "resumen_ejecutivo",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "en-principiante",
+      "language": "en",
+      "profile": "principiante",
+      "format": "guion_clase",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "en-junior-ssr",
+      "language": "en",
+      "profile": "junior_ssr",
+      "format": "tutorial",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "en-lider-tecnico",
+      "language": "en",
+      "profile": "lider_tecnico",
+      "format": "quiz",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "en-ejecutivo",
+      "language": "en",
+      "profile": "ejecutivo",
+      "format": "resumen_ejecutivo",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "pt-principiante",
+      "language": "pt",
+      "profile": "principiante",
+      "format": "flashcards",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "pt-junior-ssr",
+      "language": "pt",
+      "profile": "junior_ssr",
+      "format": "tutorial",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "pt-lider-tecnico",
+      "language": "pt",
+      "profile": "lider_tecnico",
+      "format": "guion_clase",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    },
+    {
+      "case_id": "pt-ejecutivo",
+      "language": "pt",
+      "profile": "ejecutivo",
+      "format": "resumen_ejecutivo",
+      "artifact_digest": null,
+      "status": "pendiente",
+      "judge": null,
+      "human": null
+    }
+  ],
+  "blockers": [
+    "Faltan dos revisiones humanas independientes, identificadas y fechadas",
+    "es-principiante: falta material generado",
+    "es-junior-ssr: falta material generado",
+    "es-lider-tecnico: falta material generado",
+    "es-ejecutivo: falta material generado",
+    "en-principiante: falta material generado",
+    "en-junior-ssr: falta material generado",
+    "en-lider-tecnico: falta material generado",
+    "en-ejecutivo: falta material generado",
+    "pt-principiante: falta material generado",
+    "pt-junior-ssr: falta material generado",
+    "pt-lider-tecnico: falta material generado",
+    "pt-ejecutivo: falta material generado"
+  ]
+}

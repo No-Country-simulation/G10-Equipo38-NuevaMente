@@ -1,0 +1,206 @@
+{
+  "dataset_id": "nm-pedagogical-eval60",
+  "version": "1.1.0",
+  "sources": {
+    "vcn": {
+      "path": "documents/redes_vcn_oci.pdf",
+      "sha256": "fd57e3548ca593f167c297e2ad9bbcf2297bdb87985d003037d4afc5b5cc4d2e",
+      "previous_hashes": [
+        "ff45c39cbb82b88cf3fb2c0bd828927dc01735d305fea53a23f5d0be1cc8c660",
+        "f29f930aa861f4069631181286dbcca510779bf61e4b3298c734f1fb02087214"
+      ]
+    },
+    "pagos": {
+      "path": "documents/integracion_apis_pagos.md",
+      "sha256": "33425198b6dffdc2ccaff01d46e3ff1969f1267b1890e7fba41db8f1904280bf",
+      "previous_hashes": []
+    },
+    "salud": {
+      "path": "documents/gobernanza_datos_salud.md",
+      "sha256": "1bf5c5b39eda0f4faf6d2d260b5ccb087bc7e71581ea66a29c84ee4dfc5d9455",
+      "previous_hashes": []
+    }
+  },
+  "cases": [
+    {
+      "case_id": "es-principiante",
+      "source": "vcn",
+      "parameters": {
+        "perfil_destinatario": "principiante",
+        "formato_salida": "flashcards",
+        "nicho_sector": "general",
+        "nivel_detalle": "didactico",
+        "idioma_salida": "es"
+      },
+      "objectives": [
+        "Explicar la función de una VCN, sus subredes y el aislamiento de recursos.",
+        "Distinguir configuración de acceso público/privado, rutas y reglas de seguridad."
+      ]
+    },
+    {
+      "case_id": "es-junior-ssr",
+      "source": "pagos",
+      "parameters": {
+        "perfil_destinatario": "junior_ssr",
+        "formato_salida": "tutorial",
+        "nicho_sector": "fintech",
+        "nivel_detalle": "practico",
+        "idioma_salida": "es"
+      },
+      "objectives": [
+        "Reconocer autenticación de solicitudes y validación de webhooks según la fuente.",
+        "Aplicar el tratamiento de errores e idempotencia documentados sin inventar parámetros."
+      ]
+    },
+    {
+      "case_id": "es-lider-tecnico",
+      "source": "salud",
+      "parameters": {
+        "perfil_destinatario": "lider_tecnico",
+        "formato_salida": "quiz",
+        "nicho_sector": "salud",
+        "nivel_detalle": "tecnico_profundo",
+        "idioma_salida": "es"
+      },
+      "objectives": [
+        "Reconocer roles, permisos y responsabilidades en la gobernanza de datos.",
+        "Relacionar minimización, retención y seguridad con las decisiones documentadas."
+      ]
+    },
+    {
+      "case_id": "es-ejecutivo",
+      "source": "vcn",
+      "parameters": {
+        "perfil_destinatario": "ejecutivo",
+        "formato_salida": "resumen_ejecutivo",
+        "nicho_sector": "general",
+        "nivel_detalle": "didactico",
+        "idioma_salida": "es"
+      },
+      "objectives": [
+        "Explicar la función de una VCN, sus subredes y el aislamiento de recursos.",
+        "Distinguir configuración de acceso público/privado, rutas y reglas de seguridad."
+      ]
+    },
+    {
+      "case_id": "en-principiante",
+      "source": "salud",
+      "parameters": {
+        "perfil_destinatario": "principiante",
+        "formato_salida": "guion_clase",
+        "nicho_sector": "salud",
+        "nivel_detalle": "didactico",
+        "idioma_salida": "en"
+      },
+      "objectives": [
+        "Reconocer roles, permisos y responsabilidades en la gobernanza de datos.",
+        "Relacionar minimización, retención y seguridad con las decisiones documentadas."
+      ]
+    },
+    {
+      "case_id": "en-junior-ssr",
+      "source": "pagos",
+      "parameters": {
+        "perfil_destinatario": "junior_ssr",
+        "formato_salida": "tutorial",
+        "nicho_sector": "fintech",
+        "nivel_detalle": "practico",
+        "idioma_salida": "en"
+      },
+      "objectives": [
+        "Reconocer autenticación de solicitudes y validación de webhooks según la fuente.",
+        "Aplicar el tratamiento de errores e idempotencia documentados sin inventar parámetros."
+      ]
+    },
+    {
+      "case_id": "en-lider-tecnico",
+      "source": "vcn",
+      "parameters": {
+        "perfil_destinatario": "lider_tecnico",
+        "formato_salida": "quiz",
+        "nicho_sector": "general",
+        "nivel_detalle": "tecnico_profundo",
+        "idioma_salida": "en"
+      },
+      "objectives": [
+        "Explicar la función de una VCN, sus subredes y el aislamiento de recursos.",
+        "Distinguir configuración de acceso público/privado, rutas y reglas de seguridad."
+      ]
+    },
+    {
+      "case_id": "en-ejecutivo",
+      "source": "salud",
+      "parameters": {
+        "perfil_destinatario": "ejecutivo",
+        "formato_salida": "resumen_ejecutivo",
+        "nicho_sector": "salud",
+        "nivel_detalle": "didactico",
+        "idioma_salida": "en"
+      },
+      "objectives": [
+        "Reconocer roles, permisos y responsabilidades en la gobernanza de datos.",
+        "Relacionar minimización, retención y seguridad con las decisiones documentadas."
+      ]
+    },
+    {
+      "case_id": "pt-principiante",
+      "source": "vcn",
+      "parameters": {
+        "perfil_destinatario": "principiante",
+        "formato_salida": "flashcards",
+        "nicho_sector": "general",
+        "nivel_detalle": "didactico",
+        "idioma_salida": "pt"
+      },
+      "objectives": [
+        "Explicar la función de una VCN, sus subredes y el aislamiento de recursos.",
+        "Distinguir configuración de acceso público/privado, rutas y reglas de seguridad."
+      ]
+    },
+    {
+      "case_id": "pt-junior-ssr",
+      "source": "pagos",
+      "parameters": {
+        "perfil_destinatario": "junior_ssr",
+        "formato_salida": "tutorial",
+        "nicho_sector": "fintech",
+        "nivel_detalle": "practico",
+        "idioma_salida": "pt"
+      },
+      "objectives": [
+        "Reconocer autenticación de solicitudes y validación de webhooks según la fuente.",
+        "Aplicar el tratamiento de errores e idempotencia documentados sin inventar parámetros."
+      ]
+    },
+    {
+      "case_id": "pt-lider-tecnico",
+      "source": "salud",
+      "parameters": {
+        "perfil_destinatario": "lider_tecnico",
+        "formato_salida": "guion_clase",
+        "nicho_sector": "salud",
+        "nivel_detalle": "tecnico_profundo",
+        "idioma_salida": "pt"
+      },
+      "objectives": [
+        "Reconocer roles, permisos y responsabilidades en la gobernanza de datos.",
+        "Relacionar minimización, retención y seguridad con las decisiones documentadas."
+      ]
+    },
+    {
+      "case_id": "pt-ejecutivo",
+      "source": "pagos",
+      "parameters": {
+        "perfil_destinatario": "ejecutivo",
+        "formato_salida": "resumen_ejecutivo",
+        "nicho_sector": "fintech",
+        "nivel_detalle": "didactico",
+        "idioma_salida": "pt"
+      },
+      "objectives": [
+        "Reconocer autenticación de solicitudes y validación de webhooks según la fuente.",
+        "Aplicar el tratamiento de errores e idempotencia documentados sin inventar parámetros."
+      ]
+    }
+  ]
+}

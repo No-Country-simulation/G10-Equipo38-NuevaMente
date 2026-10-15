@@ -1,0 +1,181 @@
+{
+  "dataset_id": "nm-pedagogical-eval60",
+  "case_id": "es-principiante",
+  "revision": 1,
+  "previous_digest": null,
+  "mode": "real",
+  "captured_at": "2026-10-15T02:38:49.117540Z",
+  "source": {
+    "document_id": "doc_6079d80502574f3d92e17deca746d81d",
+    "titulo": "Redes VCN en Oracle Cloud Infrastructure",
+    "hash": "f29f930aa861f4069631181286dbcca510779bf61e4b3298c734f1fb02087214",
+    "version": "v1",
+    "procedencia": null
+  },
+  "draft": {
+    "contenido_adaptado": {
+      "tipo": "flashcards",
+      "titulo": "Redes VCN en Oracle Cloud Infrastructure",
+      "introduccion_contextualizada": "Una Virtual Cloud Network (VCN) es una red privada que aísla y organiza los recursos de cómputo dentro de Oracle Cloud Infrastructure (OCI). Esta introducción presenta los conceptos fundamentales para quienes se inician en la nube.",
+      "items": [
+        {
+          "id": "card_1",
+          "frente": "¿Qué es una VCN?",
+          "dorso": "Vamos paso a paso: Una Virtual Cloud Network (VCN) es la red privada que aísla y organiza los recursos de cómputo dentro de Oracle Cloud Infrastructure. Analogía ilustrativa: (Escenario ilustrativo) Piensa en una VCN como un edificio corporativo privado donde cada piso y oficina tiene reglas estrictas sobre quién puede entrar o salir.",
+          "pista_didactica": "Piensa en un contenedor de red regional.",
+          "etiquetas": [
+            "vcn",
+            "redes",
+            "oci"
+          ],
+          "referencias": [
+            {
+              "chunk_id": "chk_2b19b3dab8a99b7a5c40fd73",
+              "pagina": 1,
+              "seccion": null
+            }
+          ]
+        },
+        {
+          "id": "card_2",
+          "frente": "¿Qué decide si una subred es pública o privada en OCI?",
+          "dorso": "Vamos paso a paso: Lo que decide si una subred es pública o privada NO es una casilla de configuración, sino su tabla de ruteo. Si la tabla envía el tráfico hacia un Internet Gateway, la subred es pública. Analogía ilustrativa: (Escenario ilustrativo) Es como la puerta principal de una casa: si tiene una puerta abierta directamente a la calle principal, es pública; si solo conecta con pasillos internos hacia otras habitaciones seguras, es privada.",
+          "pista_didactica": "Revisa el destino configurado en la tabla de ruteo.",
+          "etiquetas": [
+            "subredes",
+            "ruteo",
+            "oci"
+          ],
+          "referencias": [
+            {
+              "chunk_id": "chk_bcf3ca1a72533af87361c442",
+              "pagina": 2,
+              "seccion": null
+            }
+          ]
+        },
+        {
+          "id": "card_3",
+          "frente": "¿Para qué sirve un NAT Gateway?",
+          "dorso": "Vamos paso a paso: Un NAT Gateway permite la salida exclusiva a Internet para instancias privadas que necesitan actualizarse o llamar a APIs externas sin exponerse a recibir conexiones desde Internet. Analogía ilustrativa: (Escenario ilustrativo) Es como un buzón de salida: puedes enviar cartas hacia afuera, pero el cartero de la calle no puede usar ese mismo buzón para meter correspondencia directamente a tu escritorio.",
+          "pista_didactica": "Permite solo la salida de tráfico sin IP pública.",
+          "etiquetas": [
+            "gateways",
+            "nat",
+            "oci"
+          ],
+          "referencias": [
+            {
+              "chunk_id": "chk_67ec0307904c6e71b46b25b6",
+              "pagina": 4,
+              "seccion": null
+            }
+          ]
+        },
+        {
+          "id": "card_4",
+          "frente": "¿Qué diferencia existe entre un Security List (SL) y un Network Security Group (NSG)?",
+          "dorso": "Vamos paso a paso: Una Security List (SL) se aplica a nivel de subred completa compartida por todas sus instancias, mientras que un Network Security Group (NSG) se aplica a nivel de interfaz de red (vNIC) individual, permitiendo reglas específicas por rol. Analogía ilustrativa: (Escenario ilustrativo) El SL es como el guardia de seguridad de la entrada principal del edificio para todos los empleados de ese piso, y el NSG es como la tarjeta de acceso digital exclusiva para la puerta de una oficina específica dentro de ese piso.",
+          "pista_didactica": "Compara el nivel de aplicación: subred completa versus interfaz de red.",
+          "etiquetas": [
+            "firewall",
+            "sl",
+            "nsg"
+          ],
+          "referencias": [
+            {
+              "chunk_id": "chk_cf47c9be5867247aeb56ea11",
+              "pagina": 4,
+              "seccion": null
+            }
+          ]
+        }
+      ]
+    },
+    "metadatos": {
+      "perfil_aplicado": "principiante",
+      "formato_generado": "flashcards",
+      "nicho_sector": "general",
+      "nivel_detalle": "didactico",
+      "idioma_origen": "es",
+      "idioma_salida": "es",
+      "conceptos_clave": [
+        "Virtual Cloud Network (VCN)",
+        "CIDR",
+        "Subred pública",
+        "Subred privada",
+        "Gateway",
+        "Security List",
+        "Network Security Group"
+      ],
+      "prerrequisitos": [],
+      "objetivos_aprendizaje": [
+        "Comprender qué es una Virtual Cloud Network (VCN) y cómo aísla recursos.",
+        "Identificar la diferencia estructural entre subredes públicas y privadas mediante tablas de ruteo.",
+        "Reconocer las funciones principales de los gateways y los mecanismos de seguridad en OCI."
+      ],
+      "tiempo_estimado_estudio_minutos": 15,
+      "alcance": {
+        "tipo": "documento_completo",
+        "seccion_id": null,
+        "secciones_cubiertas": [
+          "pagina:1",
+          "pagina:2",
+          "pagina:3",
+          "pagina:4",
+          "pagina:5",
+          "pagina:6",
+          "pagina:7",
+          "pagina:8"
+        ]
+      }
+    }
+  },
+  "judge": {
+    "anclaje_fuente_score": 1.0,
+    "cantidad_afirmaciones": 39,
+    "cantidad_respaldadas": 39,
+    "estado_evaluacion": "aprobada",
+    "claridad_pedagogica": "alta",
+    "adecuacion_perfil": "alta",
+    "cobertura_objetivos": "completa",
+    "coherencia_didactica": "alta",
+    "verificacion_visual": "aprobada",
+    "observaciones": null,
+    "razones_bloqueo": []
+  },
+  "references": [
+    {
+      "chunk_id": "chk_2b19b3dab8a99b7a5c40fd73",
+      "pagina": 1,
+      "seccion": null
+    },
+    {
+      "chunk_id": "chk_bcf3ca1a72533af87361c442",
+      "pagina": 2,
+      "seccion": null
+    },
+    {
+      "chunk_id": "chk_67ec0307904c6e71b46b25b6",
+      "pagina": 4,
+      "seccion": null
+    },
+    {
+      "chunk_id": "chk_cf47c9be5867247aeb56ea11",
+      "pagina": 4,
+      "seccion": null
+    }
+  ],
+  "trace": {
+    "modelo_generacion": "gemini-3.5-flash-lite",
+    "modelo_verificacion": "gemini-3.5-flash-lite",
+    "modelo_embeddings": "gemini-embedding-2",
+    "prompt_version": "nm-prompts-1.1.1",
+    "parser_version": "config-sha256:4be5c606c9d0c76c1ba46fc199743a0005479fb05f7d7c3cf11fa78b403c78ef",
+    "retrieval": {
+      "k": 5,
+      "fetch_k": 15,
+      "lambda_mult": 0.7
+    }
+  }
+}
