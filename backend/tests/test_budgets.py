@@ -225,3 +225,35 @@ def test_reinicio_al_limite_ordinario_conserva_capacidad_de_limpieza(entorno_oci
     with mantenimiento_storage(), pytest.raises(StorageNotFound):
         reiniciado.delete("demo/inexistente")
     assert reiniciado.presupuesto.resumen()["solicitudes"] == 96
+
+
+def test_limites_configurables_validacion_al_arranque():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Configuracion(workspace_max_documents=0)
+    with pytest.raises(ValidationError):
+        Configuracion(workspace_max_documents=-1)
+    with pytest.raises(ValidationError):
+        Configuracion(workspace_max_documents=101)
+    with pytest.raises(ValidationError):
+        Configuracion(workspace_max_generations=0)
+    with pytest.raises(ValidationError):
+        Configuracion(workspace_max_generations=501)
+
+    cfg = Configuracion(workspace_max_documents=10, workspace_max_generations=50)
+    assert cfg.workspace_max_documents == 10
+    assert cfg.workspace_max_generations == 50
+
+
+def test_registro_operativo_rechaza_limites_no_positivos(tmp_path):
+    with pytest.raises(ValueError, match="enteros positivos"):
+        RegistroOperativo(tmp_path / "inv1.db", limite_documentos=0)
+    with pytest.raises(ValueError, match="enteros positivos"):
+        RegistroOperativo(tmp_path / "inv2.db", limite_generaciones=-5)
+    with pytest.raises(ValueError, match="enteros positivos"):
+        RegistroOperativo(tmp_path / "inv3.db", limite_documentos=True)
+    with pytest.raises(ValueError, match="enteros positivos"):
+        RegistroOperativo(tmp_path / "inv4.db", limite_generaciones=2.5)
+    with pytest.raises(ValueError, match="enteros positivos"):
+        RegistroOperativo(tmp_path / "inv5.db", max_documentos=False)

@@ -82,30 +82,68 @@ def supervisor(estado: EstadoGrafo, dependencias: DependenciasGrafo) -> dict:
         if estado.workspace_id != ctx.workspace_id:
             return _fallo("NOT_FOUND", "Documento no disponible en este espacio.")
         solicitud = estado.parametros
-        if solicitud is None or estado.document_id != solicitud.document_id:
-            return _fallo("VALIDATION_ERROR", "Parámetros de generación inválidos.")
-        # consulto el documento en el almacenamiento y compruebo que pertenezca al espacio de trabajo autorizado
-        documento = dependencias.obtener_documento(ctx.workspace_id, solicitud.document_id)
-        ctx.chequear()
+        doc_ids = (
+            solicitud.document_ids
+            if solicitud and solicitud.document_ids
+            else (
+                [solicitud.document_id]
+                if solicitud and solicitud.document_id
+                else (
+                    estado.document_ids if estado.document_ids else ([estado.document_id] if estado.document_id else [])
+                )
+            )
+        )
         if (
-            documento is None
-            or documento.workspace_id != ctx.workspace_id
-            or documento.fuente.document_id != solicitud.document_id
+            solicitud is None
+            or not doc_ids
+            or (solicitud.document_id and estado.document_id and estado.document_id != solicitud.document_id)
         ):
-            return _fallo("NOT_FOUND", "Documento no disponible en este espacio.")
-        if documento.estado != DocumentStatus.READY or documento.vision_pendiente:
-            return _fallo("INVALID_STATE", "El documento debe estar ready y sin interpretación visual pendiente.")
-        if solicitud.alcance.tipo == "seccion" and solicitud.alcance.seccion_id not in documento.secciones:
+            return _fallo("VALIDATION_ERROR", "Parámetros de generación inválidos.")
+
+        docs = {}
+        idiomas_origen = {}
+        for d_id in doc_ids:
+            documento = dependencias.obtener_documento(ctx.workspace_id, d_id)
+            ctx.chequear()
+            if documento is None or documento.workspace_id != ctx.workspace_id or documento.fuente.document_id != d_id:
+                return _fallo("NOT_FOUND", "Documento no disponible en este espacio.")
+            if documento.estado != DocumentStatus.READY or documento.vision_pendiente:
+                return _fallo("INVALID_STATE", "El documento debe estar ready y sin interpretación visual pendiente.")
+            try:
+                lang = normalizar_idioma_origen(documento.idioma_origen)
+                idiomas_origen[d_id] = lang
+            except ValueError:
+                return _fallo("VALIDATION_ERROR", "El idioma de origen no está soportado.")
+            docs[d_id] = documento
+
+        doc_principal = docs[doc_ids[0]]
+        if solicitud.alcance.tipo == "seccion" and solicitud.alcance.seccion_id not in doc_principal.secciones:
             return _fallo("VALIDATION_ERROR", "La sección solicitada no pertenece al documento.")
-        try:
-            idioma_origen = normalizar_idioma_origen(documento.idioma_origen)
-        except ValueError:
-            return _fallo("VALIDATION_ERROR", "El idioma de origen no está soportado.")
+
+        # Resolución de idioma colectivo: único o "mixto"
+        idiomas_unicos = set(idiomas_origen.values())
+        idioma_origen = list(idiomas_unicos)[0] if len(idiomas_unicos) == 1 else "mixto"
+
+        requiere_revision_visual = False
+        if solicitud.alcance.tipo == "seccion":
+            requiere_revision_visual = doc_principal.contiene_material_visual and (
+                doc_principal.secciones_visuales is None
+                or solicitud.alcance.seccion_id in doc_principal.secciones_visuales
+            )
+        else:
+            requiere_revision_visual = any(d.contiene_material_visual for d in docs.values())
+
         return {
-            "documento_fuente": documento.fuente,
-            "source_hash": documento.fuente.hash,
+            "document_id": doc_ids[0],
+            "document_ids": doc_ids,
+            "documento_fuente": doc_principal.fuente,
+            "documentos_fuente": [docs[d_id].fuente for d_id in doc_ids],
+            "source_hash": doc_principal.fuente.hash,
+            "source_hashes": {d_id: docs[d_id].fuente.hash for d_id in doc_ids},
             "idioma_origen": idioma_origen,
-            "secciones_disponibles": documento.secciones,
+            "idiomas_origen": idiomas_origen,
+            "secciones_disponibles": doc_principal.secciones,
+            "secciones_por_documento": {d_id: docs[d_id].secciones for d_id in doc_ids},
             "deadline": ctx.deadline,
             "restricciones": RestriccionesGeneracion(
                 formato=solicitud.formato_salida,
@@ -114,14 +152,7 @@ def supervisor(estado: EstadoGrafo, dependencias: DependenciasGrafo) -> dict:
                 requisitos_formato=_FORMATOS[solicitud.formato_salida],
                 max_llamadas=min(20, estado.presupuesto.limite),
             ),
-            "rubrica": RubricaSalida(
-                requiere_revision_visual=documento.contiene_material_visual
-                and (
-                    solicitud.alcance.tipo == "documento_completo"
-                    or documento.secciones_visuales is None
-                    or solicitud.alcance.seccion_id in documento.secciones_visuales
-                )
-            ),
+            "rubrica": RubricaSalida(requiere_revision_visual=requiere_revision_visual),
         }
     except TrabajoCanceladoError:
         return _fallo("CANCELLED", "El trabajo fue cancelado o el espacio fue retirado.", status=JobStatus.CANCELLED)

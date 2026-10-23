@@ -670,7 +670,12 @@ Presupuestos propios iniciales, inferiores a las asignaciones verificadas:
   Es un presupuesto propio, inferior a las 50.000 solicitudes mensuales publicadas
   para Object Storage Always Free; el operador sigue verificando el consumo agregado
   de la tenancy. Se conserva el 10% para limpieza y la alerta al 80%.
-- Hasta cinco documentos y veinte generaciones conservadas por espacio.
+- Hasta cinco documentos y veinte generaciones conservadas por espacio (valores por defecto).
+  Configurables al arrancar el servicio mediante WORKSPACE_MAX_DOCUMENTS (1..100) y
+  WORKSPACE_MAX_GENERATIONS (1..500) sin alterar la cuota de almacenamiento OCI, la
+  retención temporal de 30 días ni los límites de ingesta. Reducir un límite no purga
+  datos existentes pero bloquea nuevas admisiones hasta liberar cupo; conservar más recursos
+  no incrementa el consumo de Gemini por sí solo (este depende de las operaciones activas).
 - Reservar capacidad antes de aceptar un archivo o exportación.
 - Alertar al 80% y rechazar nuevas escrituras al límite del presupuesto.
 - Desactivar versionado ilimitado, replicación y transiciones automáticas de clase.

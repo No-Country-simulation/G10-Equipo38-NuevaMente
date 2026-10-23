@@ -82,16 +82,16 @@ def _revalidar(estado, dependencias):
     actualizado = supervisor(estado, dependencias.grafo)
     if "error" in actualizado:
         raise EstadoCriticError(actualizado["error"].code, actualizado["error"].message, actualizado["status"])
-    if any(
-        actualizado[campo] != getattr(estado, campo)
-        for campo in (
-            "source_hash",
-            "documento_fuente",
-            "idioma_origen",
-            "secciones_disponibles",
-            "rubrica",
-        )
-    ):
+    campos = [
+        "source_hash",
+        "documento_fuente",
+        "idioma_origen",
+        "secciones_disponibles",
+        "rubrica",
+    ]
+    if len(estado.document_ids) > 1:
+        campos.extend(["source_hashes", "documentos_fuente"])
+    if any(actualizado.get(campo) != getattr(estado, campo) for campo in campos):
         raise EstadoCriticError("INVALID_STATE", "La fuente o su rúbrica cambiaron durante la revisión.")
 
 
@@ -198,6 +198,7 @@ class _SesionRevision:
             contenido=self.borrador.contenido_adaptado,
             metadatos=self.borrador.metadatos,
             evaluacion_factual=self.factual,
+            source_hashes=self.estado.source_hashes,
         )
         payload = json.loads(prompts.critic.datos_json)
         if tarea in ("descomponer", "juzgar"):
@@ -371,13 +372,19 @@ class _SesionRevision:
         revisiones = []
         for chunk in {c.chunk_id: c for c in chunks}.values():
             _revalidar(self.estado, self.dependencias)
+            doc_id = getattr(chunk, "document_id", None) or self.estado.document_id
+            doc_hash = (
+                self.estado.source_hashes.get(doc_id)
+                if getattr(self.estado, "source_hashes", None) and doc_id in self.estado.source_hashes
+                else self.estado.source_hash
+            )
             imagen = (
                 None
                 if self.dependencias.obtener_imagen is None
                 else self.dependencias.obtener_imagen(
                     self.estado.workspace_id,
-                    self.estado.document_id,
-                    self.estado.source_hash,
+                    doc_id,
+                    doc_hash,
                     chunk.chunk_id,
                 )
             )
@@ -399,7 +406,7 @@ class _SesionRevision:
                 imagen.document_id,
                 imagen.source_hash,
                 imagen.chunk_id,
-            ) != (self.estado.workspace_id, self.estado.document_id, self.estado.source_hash, chunk.chunk_id):
+            ) != (self.estado.workspace_id, doc_id, doc_hash, chunk.chunk_id):
                 raise EstadoCriticError("NOT_FOUND", "Imagen no disponible para el documento y espacio autorizados.")
             imagen = ImagenOriginal.model_validate(imagen.model_dump(), strict=True)
             if imagen.interpretacion_ambigua:
@@ -522,6 +529,8 @@ def critic(estado: EstadoGrafo, dependencias: DependenciasCritic) -> dict:
             set(estado.secciones_disponibles)
             if estado.parametros.alcance.tipo == "documento_completo"
             else {estado.parametros.alcance.seccion_id}
+            if estado.parametros.alcance.tipo == "seccion"
+            else set(estado.secciones_cubiertas)
         )
         faltantes = sorted(necesarias - set(estado.secciones_cubiertas))
         solicitudes = [

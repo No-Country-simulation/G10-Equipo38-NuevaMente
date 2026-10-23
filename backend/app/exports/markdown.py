@@ -51,6 +51,8 @@ _ETIQUETAS = {
         "diapositiva": "Diapositiva",
         "interaccion": "Pregunta interactiva",
         "fuente": "Documento fuente",
+        "fuentes": "Documentos fuente",
+        "documento": "Documento",
         "version": "Versión",
         "procedencia": "Procedencia",
         "referencias": "Referencias",
@@ -99,6 +101,8 @@ _ETIQUETAS = {
         "diapositiva": "Slide",
         "interaccion": "Interactive question",
         "fuente": "Source document",
+        "fuentes": "Source documents",
+        "documento": "Document",
         "version": "Version",
         "procedencia": "Provenance",
         "referencias": "References",
@@ -147,6 +151,8 @@ _ETIQUETAS = {
         "diapositiva": "Slide",
         "interaccion": "Pergunta interativa",
         "fuente": "Documento-fonte",
+        "fuentes": "Documentos-fonte",
+        "documento": "Documento",
         "version": "Versão",
         "procedencia": "Procedência",
         "referencias": "Referências",
@@ -189,7 +195,8 @@ class _Plantilla:
             self._referencia(r)
 
     def _referencia(self, r):
-        clave = (r.chunk_id, r.pagina, r.seccion)
+        doc_id = getattr(r, "document_id", None)
+        clave = (doc_id, r.chunk_id, r.pagina, r.seccion)
         if clave not in self.referencias:
             self.referencias[clave] = len(self.referencias) + 1
         return self.referencias[clave]
@@ -212,14 +219,18 @@ class _Plantilla:
 
     def terminar(self):
         self.titulo("referencias")
-        self.agregar(
-            "\n".join(
-                f"[^{n}]: {self.l['fragmento']}: {texto(cid, una_linea=True)}"
-                + (f" · {self.l['pagina']}: {pagina}" if pagina is not None else "")
-                + (f" · {self.l['seccion']}: {texto(seccion, una_linea=True)}" if seccion is not None else "")
-                for (cid, pagina, seccion), n in self.referencias.items()
-            )
-        )
+        lineas = []
+        for (doc_id, cid, pagina, seccion), n in self.referencias.items():
+            linea = f"[^{n}]: "
+            if doc_id:
+                linea += f"{self.l.get('documento', 'Documento')}: {texto(doc_id, una_linea=True)} · "
+            linea += f"{self.l['fragmento']}: {texto(cid, una_linea=True)}"
+            if pagina is not None:
+                linea += f" · {self.l['pagina']}: {pagina}"
+            if seccion is not None:
+                linea += f" · {self.l['seccion']}: {texto(seccion, una_linea=True)}"
+            lineas.append(linea)
+        self.agregar("\n".join(lineas))
         return "\n\n".join(self.partes) + "\n"
 
 
@@ -307,11 +318,21 @@ def renderizar_markdown(paquete: PedagogicalOutput) -> bytes:
             p.citas(escena.referencias)
     else:
         raise TypeError("Formato pedagógico no soportado")
-    fuente = paquete.documento_fuente
-    p.titulo("fuente")
-    p.agregar(texto(fuente.titulo))
-    p.campo("version", fuente.version)
-    p.agregar("SHA-256: " + texto(fuente.hash, una_linea=True))
-    if fuente.procedencia:
-        p.campo("procedencia", fuente.procedencia)
+    fuentes = getattr(paquete, "documentos_fuente", None) or [paquete.documento_fuente]
+    if len(fuentes) > 1:
+        p.titulo("fuentes")
+        for f in fuentes:
+            p.agregar("### " + texto(f.titulo))
+            p.campo("version", f.version)
+            p.agregar("SHA-256: " + texto(f.hash, una_linea=True))
+            if f.procedencia:
+                p.campo("procedencia", f.procedencia)
+    else:
+        fuente = fuentes[0]
+        p.titulo("fuente")
+        p.agregar(texto(fuente.titulo))
+        p.campo("version", fuente.version)
+        p.agregar("SHA-256: " + texto(fuente.hash, una_linea=True))
+        if fuente.procedencia:
+            p.campo("procedencia", fuente.procedencia)
     return p.terminar().encode("utf-8")

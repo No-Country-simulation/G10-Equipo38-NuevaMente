@@ -159,7 +159,14 @@ def entorno(tmp_path, aislar_estado_seguridad):
             doble.bloquear.set()
 
 
-def esperar(e, recibo, status="completed", *, timeout=15):
+def esperar(e, recibo, status="completed", *, timeout=60):
+    """Espera un estado terminal del trabajo con red de seguridad amplia.
+
+    El timeout NO es una aserción de velocidad: los estados failed/cancelled
+    cortan de inmediato. Medido en equipos cargados una generación con dobles
+    puede superar 10 s (incluye Chroma, SQLite y SSE); con el margen anterior
+    de 15 s la suite se volvía intermitente bajo contención.
+    """
     limite = time.monotonic() + timeout
     ultimo = None
     while time.monotonic() < limite:

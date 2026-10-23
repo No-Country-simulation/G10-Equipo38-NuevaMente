@@ -327,3 +327,22 @@ def test_ambito_grande_conserva_busqueda_hnsw_filtrada(pila, monkeypatch):
     assert len(hits) == 2 and len(peticiones) == 1
     assert peticiones[0]["n_results"] == 2
     assert {"document_id": "doc-a"} in peticiones[0]["where"]["$and"]
+
+
+def test_recuperar_multidocumental_vacio_y_cruce(pila):
+    indice, _, _ = pila
+    retriever = RetrieverMMR(indice, configuracion=configuracion(retrieval_k=4))
+    assert retriever.recuperar_multidocumental("espacio-a", [], "VCN", contexto=contexto()).evidencia == []
+
+    doc_b_chunks = [
+        chunk(0, "Reglas de seguridad y firewall.", seccion="Seguridad", workspace="espacio-a", documento="doc-b"),
+        chunk(1, "Tablas de rutas y gateways.", seccion="Rutas", workspace="espacio-a", documento="doc-b"),
+    ]
+    indice.indexar("espacio-a", "doc-b", doc_b_chunks, contexto=contexto())
+
+    resultado = retriever.recuperar_multidocumental(
+        "espacio-a", ["doc-a", "doc-b"], "VCN y seguridad", contexto=contexto()
+    )
+    docs_encontrados = {e.chunk.document_id for e in resultado.evidencia}
+    assert "doc-a" in docs_encontrados and "doc-b" in docs_encontrados
+    assert all(e.como_referencia().document_id in ("doc-a", "doc-b") for e in resultado.evidencia)

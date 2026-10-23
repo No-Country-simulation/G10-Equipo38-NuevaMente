@@ -7,7 +7,18 @@ from app.schemas.errors import ErrorAplicacion, ErrorCode
 
 
 def admitir_trabajo(
-    gestor, workspace_id, document_id, tipo, cuerpo, ejecutar, *, clave=None, cache_key=None, preparar=lambda: None
+    gestor,
+    workspace_id,
+    document_id,
+    tipo,
+    cuerpo,
+    ejecutar,
+    *,
+    clave=None,
+    cache_key=None,
+    document_ids=None,
+    scope_hash=None,
+    preparar=lambda: None,
 ):
     if clave is not None and (not clave.strip() or not 1 <= len(clave) <= 128):
         raise ErrorAplicacion(ErrorCode.INVALID_REQUEST, "Idempotency-Key debe tener entre 1 y 128 caracteres.")
@@ -33,7 +44,16 @@ def admitir_trabajo(
             return cache
         try:
             preparar()
-            gestor.enqueue(workspace_id, tipo, ejecutar, job_id=job_id, document_id=document_id, cache_key=cache_key)
+            gestor.enqueue(
+                workspace_id,
+                tipo,
+                ejecutar,
+                job_id=job_id,
+                document_id=document_id,
+                cache_key=cache_key,
+                document_ids=document_ids,
+                scope_hash=scope_hash,
+            )
         except Exception:
             if clave is not None:
                 db.abandonar_intencion_job(workspace_id, tipo, clave, job_id)

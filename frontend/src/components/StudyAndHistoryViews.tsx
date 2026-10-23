@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BookMarked, History, MessageSquare, RefreshCw, Search, TrendingUp } from 'lucide-react';
 import { APIClient, APIError } from '../api/client';
 import {
@@ -46,6 +46,7 @@ export const ChatTutorView: React.FC<{
   token: string;
   workspaceId: string;
   documentId: string;
+  documentIds?: string[];
   perfil: RecipientProfile;
   idiomaSalida: OutputLanguage;
   idiomaUi: OutputLanguage;
@@ -55,12 +56,18 @@ export const ChatTutorView: React.FC<{
   token,
   workspaceId,
   documentId,
+  documentIds,
   perfil,
   idiomaSalida,
   idiomaUi,
   onSessionInvalid,
 }) => {
-  const scopeKey = `chat:${workspaceId}:${JSON.stringify([documentId, perfil, idiomaSalida])}`;
+  const effectiveDocIds = useMemo(
+    () => Array.from(new Set(documentIds && documentIds.length > 0 ? documentIds : [documentId])).sort(),
+    [documentId, JSON.stringify(documentIds)]
+  );
+  const primaryDocId = effectiveDocIds[0] || documentId;
+  const scopeKey = `chat:${workspaceId}:${JSON.stringify([effectiveDocIds, perfil, idiomaSalida])}`;
   const [turnos, setTurnos] = useScopedState<TurnoChatUI[]>(scopeKey, []);
   const otroPendiente = useOtherPendingChat(workspaceId, scopeKey);
   const [input, setInput] = useState('');
@@ -70,11 +77,10 @@ export const ChatTutorView: React.FC<{
   useEffect(() => {
     let active = true;
     setDocError(null);
-    apiClient
-      .getDocument(token, documentId)
-      .then((doc) => {
+    Promise.all(effectiveDocIds.map((id) => apiClient.getDocument(token, id)))
+      .then((docs) => {
         if (!active) return;
-        setDocReady(doc?.status === 'ready');
+        setDocReady(docs.every((doc) => doc?.status === 'ready'));
       })
       .catch((err) => {
         if (!active) return;
@@ -87,7 +93,7 @@ export const ChatTutorView: React.FC<{
     return () => {
       active = false;
     };
-  }, [apiClient, token, documentId, onSessionInvalid]);
+  }, [apiClient, token, JSON.stringify(effectiveDocIds), onSessionInvalid]);
 
   const pendiente =
     turnos.length > 0 && ['admitting', 'queued', 'running'].includes(turnos[turnos.length - 1].status)
@@ -102,7 +108,7 @@ export const ChatTutorView: React.FC<{
       let resValida = turno.respuesta;
       if (datos.status === 'completed') {
         resValida = validarRespuestaChat(datos.result, {
-          document_id: documentId,
+          document_id: primaryDocId,
           pregunta: turno.pregunta,
           perfil_destinatario: perfil,
           idioma_salida: idiomaSalida,
@@ -168,7 +174,8 @@ export const ChatTutorView: React.FC<{
       const recibo = await apiClient.createChat(
         token,
         {
-          document_id: documentId,
+          document_id: primaryDocId,
+          document_ids: effectiveDocIds.length > 1 ? effectiveDocIds : undefined,
           pregunta: q,
           perfil_destinatario: perfil,
           idioma_salida: idiomaSalida,
@@ -198,7 +205,8 @@ export const ChatTutorView: React.FC<{
       const recibo = await apiClient.createChat(
         token,
         {
-          document_id: documentId,
+          document_id: primaryDocId,
+          document_ids: effectiveDocIds.length > 1 ? effectiveDocIds : undefined,
           pregunta: turno.pregunta,
           perfil_destinatario: perfil,
           idioma_salida: idiomaSalida,
@@ -401,12 +409,18 @@ export const GlossaryView: React.FC<{
   apiClient: APIClient;
   token: string;
   documentId: string;
+  documentIds?: string[];
   perfil: RecipientProfile;
   idiomaSalida: OutputLanguage;
   idiomaUi: OutputLanguage;
   onSessionInvalid: () => void;
-}> = ({ apiClient, token, documentId, perfil, idiomaSalida, idiomaUi, onSessionInvalid }) => {
-  const scope = `glossary:${JSON.stringify([token, documentId, perfil, idiomaSalida])}`;
+}> = ({ apiClient, token, documentId, documentIds, perfil, idiomaSalida, idiomaUi, onSessionInvalid }) => {
+  const effectiveDocIds = useMemo(
+    () => Array.from(new Set(documentIds && documentIds.length > 0 ? documentIds : [documentId])).sort(),
+    [documentId, JSON.stringify(documentIds)]
+  );
+  const primaryDocId = effectiveDocIds[0] || documentId;
+  const scope = `glossary:${JSON.stringify([token, effectiveDocIds, perfil, idiomaSalida])}`;
   const [jobId, setJobId] = useScopedState<string | null>(scope + ':job', null);
   const [status, setStatus] = useScopedState<string | null>(scope + ':status', null);
   const [pendingKey, setPendingKey] = useScopedState<string | null>(scope + ':key', null);
@@ -429,7 +443,7 @@ export const GlossaryView: React.FC<{
       if (nextStatus === 'completed') {
         const glosario = await apiClient.getGlossary(token, currentJobId);
         validarGlosario(glosario, currentJobId, {
-          document_id: documentId,
+          document_id: primaryDocId,
           perfil_destinatario: perfil,
           idioma_salida: idiomaSalida,
         });
@@ -467,7 +481,8 @@ export const GlossaryView: React.FC<{
       const recibo = await apiClient.createGlossary(
         token,
         {
-          document_id: documentId,
+          document_id: primaryDocId,
+          document_ids: effectiveDocIds.length > 1 ? effectiveDocIds : undefined,
           perfil_destinatario: perfil,
           idioma_salida: idiomaSalida,
         },

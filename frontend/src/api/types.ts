@@ -6,7 +6,7 @@ export type OutputLanguage = 'es' | 'en' | 'pt';
 export type JobStatus = 'queued' | 'running' | 'completed' | 'rejected_quality' | 'failed' | 'cancelled';
 export type DocumentStatus = 'processing' | 'ready' | 'failed';
 export type ExportFormat = 'json' | 'md' | 'pdf' | 'csv' | 'tsv' | 'apkg';
-export type TipoAlcance = 'documento_completo' | 'seccion';
+export type TipoAlcance = 'documento_completo' | 'seccion' | 'multi_documento';
 
 export const PERFILES: readonly RecipientProfile[] = [
   'principiante',
@@ -142,6 +142,7 @@ export interface DocumentosResponse {
 export interface AlcanceSolicitud {
   tipo: TipoAlcance;
   seccion_id?: string;
+  document_ids?: string[];
 }
 
 export interface Alcance extends AlcanceSolicitud {
@@ -151,6 +152,7 @@ export interface Alcance extends AlcanceSolicitud {
 export interface GenerateRequest {
   modo_generacion?: 'multiagente' | 'basico';
   document_id: string;
+  document_ids?: string[];
   perfil_destinatario: RecipientProfile;
   formato_salida: PedagogicalFormat;
   nicho_sector: IndustryNiche;
@@ -163,6 +165,7 @@ export interface Referencia {
   chunk_id: string;
   pagina?: number | null;
   seccion?: string | null;
+  document_id?: string | null;
 }
 
 export interface EvaluacionCalidad {
@@ -295,6 +298,7 @@ export interface ReviewedStudentOutput {
   status: 'aprobado';
   metadatos: Metadatos;
   documento_fuente: DocumentoFuente;
+  documentos_fuente?: DocumentoFuente[];
   contenido_adaptado: ContenidoEstudiante;
   evaluacion_calidad: EvaluacionCalidad;
   referencias: Referencia[];
@@ -363,7 +367,8 @@ export interface QuizAnswerResponse {
 }
 
 export interface ChatRequest {
-  document_id: string;
+  document_id?: string;
+  document_ids?: string[];
   pregunta: string;
   perfil_destinatario: RecipientProfile;
   idioma_salida: OutputLanguage;
@@ -371,7 +376,9 @@ export interface ChatRequest {
 
 export interface ChatAnswer {
   document_id: string;
+  document_ids?: string[];
   document_hash: string;
+  documentos_fuente?: DocumentoFuente[];
   pregunta: string;
   perfil_destinatario: RecipientProfile;
   idioma_salida: OutputLanguage;
@@ -382,7 +389,8 @@ export interface ChatAnswer {
 }
 
 export interface GlossaryRequest {
-  document_id: string;
+  document_id?: string;
+  document_ids?: string[];
   perfil_destinatario: RecipientProfile;
   idioma_salida: OutputLanguage;
 }
@@ -402,6 +410,7 @@ export interface GlossaryOutput {
   schema_version?: '1.0';
   glossary_id: string;
   documento_fuente: DocumentoFuente;
+  documentos_fuente?: DocumentoFuente[];
   perfil_destinatario: RecipientProfile;
   idioma_salida: OutputLanguage;
   estado: 'verificado' | 'sin_definiciones' | 'sin_terminos';

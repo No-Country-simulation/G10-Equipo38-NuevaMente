@@ -87,7 +87,12 @@ class EvidenciaRecuperada(BaseModel):
 
     def como_referencia(self) -> Referencia:
         """Proyecta la evidencia al formato de cita pública (Referencia)."""
-        return Referencia(chunk_id=self.chunk.chunk_id, pagina=self.chunk.pagina, seccion=self.chunk.seccion)
+        return Referencia(
+            chunk_id=self.chunk.chunk_id,
+            pagina=self.chunk.pagina,
+            seccion=self.chunk.seccion,
+            document_id=self.chunk.document_id,
+        )
 
 
 class VerificacionVisual(BaseModel):

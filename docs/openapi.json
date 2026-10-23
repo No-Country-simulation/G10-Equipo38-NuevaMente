@@ -5,6 +5,14 @@
         "additionalProperties": false,
         "description": "Alcance de salida con cobertura calculada por el backend.",
         "properties": {
+          "document_ids": {
+            "description": "Fuentes explícitas para multi_documento o espacio_completo resuelto.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Ids",
+            "type": "array"
+          },
           "seccion_id": {
             "anyOf": [
               {
@@ -14,7 +22,7 @@
                 "type": "null"
               }
             ],
-            "description": "Obligatorio cuando tipo=seccion; ignorado en documento_completo.",
+            "description": "Obligatorio cuando tipo=seccion; ignorado en otros.",
             "title": "Seccion Id"
           },
           "secciones_cubiertas": {
@@ -34,10 +42,12 @@
           },
           "tipo": {
             "default": "documento_completo",
-            "description": "documento_completo es el valor por defecto; seccion exige seccion_id.",
+            "description": "documento_completo es el valor por defecto; seccion exige seccion_id; multi_documento exige 2+ fuentes.",
             "enum": [
               "documento_completo",
-              "seccion"
+              "seccion",
+              "multi_documento",
+              "espacio_completo"
             ],
             "title": "Tipo",
             "type": "string"
@@ -48,8 +58,16 @@
       },
       "AlcanceSolicitud": {
         "additionalProperties": false,
-        "description": "Qué parte del documento se adapta (§16.1).\n\nSe usa DOS veces con el mismo modelo: en la petición de generación\n(``{\"tipo\": \"documento_completo\"}`` o ``{\"tipo\": \"seccion\",\n\"seccion_id\": \"sec_3\"}``). La subclase de salida ``Alcance``, dentro de\n``metadatos``, agrega ``secciones_cubiertas`` para declarar la cobertura\nreal lograda (contratos-api.md: \"alcance conserva la estructura de\nentrada y agrega secciones cubiertas; no alterna objeto/string\").",
+        "description": "Qué parte del documento se adapta (§16.1 y §5.1).\n\nSe usa DOS veces con el mismo modelo: en la petición de generación\n(``{\"tipo\": \"documento_completo\"}``, ``{\"tipo\": \"seccion\", \"seccion_id\": \"sec_3\"}``,\n``{\"tipo\": \"multi_documento\"}`` o ``{\"tipo\": \"espacio_completo\"}``). La subclase de\nsalida ``Alcance``, dentro de ``metadatos``, agrega ``secciones_cubiertas``.",
         "properties": {
+          "document_ids": {
+            "description": "Fuentes explícitas para multi_documento o espacio_completo resuelto.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Ids",
+            "type": "array"
+          },
           "seccion_id": {
             "anyOf": [
               {
@@ -59,15 +77,17 @@
                 "type": "null"
               }
             ],
-            "description": "Obligatorio cuando tipo=seccion; ignorado en documento_completo.",
+            "description": "Obligatorio cuando tipo=seccion; ignorado en otros.",
             "title": "Seccion Id"
           },
           "tipo": {
             "default": "documento_completo",
-            "description": "documento_completo es el valor por defecto; seccion exige seccion_id.",
+            "description": "documento_completo es el valor por defecto; seccion exige seccion_id; multi_documento exige 2+ fuentes.",
             "enum": [
               "documento_completo",
-              "seccion"
+              "seccion",
+              "multi_documento",
+              "espacio_completo"
             ],
             "title": "Tipo",
             "type": "string"
@@ -145,6 +165,14 @@
           },
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
+          },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
           },
           "evaluacion_calidad": {
             "$ref": "#/components/schemas/EvaluacionNoRealizada"
@@ -247,6 +275,14 @@
           },
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
+          },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
           },
           "evaluacion_calidad": {
             "$ref": "#/components/schemas/EvaluacionNoRealizada"
@@ -393,6 +429,20 @@
             "title": "Document Id",
             "type": "string"
           },
+          "document_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Ids",
+            "type": "array"
+          },
+          "documentos_fuente": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
+          },
           "estado": {
             "enum": [
               "respondida",
@@ -451,10 +501,24 @@
         "additionalProperties": false,
         "properties": {
           "document_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Document Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "document_ids": {
+            "description": "Lista de documentos para multidocumental (§6.1).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Ids",
+            "type": "array"
           },
           "idioma_salida": {
             "$ref": "#/components/schemas/OutputLanguage"
@@ -470,7 +534,6 @@
           }
         },
         "required": [
-          "document_id",
           "pregunta",
           "perfil_destinatario",
           "idioma_salida"
@@ -1560,13 +1623,27 @@
         "properties": {
           "alcance": {
             "$ref": "#/components/schemas/AlcanceSolicitud",
-            "description": "Documento completo o sección explícita."
+            "description": "Documento completo, sección explícita o multi_documento."
           },
           "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Documento ready del espacio (§7.2).",
-            "minLength": 1,
-            "title": "Document Id",
-            "type": "string"
+            "title": "Document Id"
+          },
+          "document_ids": {
+            "description": "Lista de documentos para multidocumental (§5.1).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Ids",
+            "type": "array"
           },
           "formato_salida": {
             "$ref": "#/components/schemas/PedagogicalFormat"
@@ -1594,7 +1671,6 @@
           }
         },
         "required": [
-          "document_id",
           "perfil_destinatario",
           "formato_salida",
           "nicho_sector",
@@ -1796,6 +1872,14 @@
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
           },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del glosario (§6.2).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
+          },
           "estado": {
             "enum": [
               "verificado",
@@ -1872,13 +1956,27 @@
       },
       "GlossaryRequest": {
         "additionalProperties": false,
-        "description": "Body de POST /api/glossaries (issues #39/#40).\n\n202 con glossary_id y URLs del trabajo, o 200 directo si hay caché\naprobada para esa combinación documento+perfil+idioma (la clave de caché\nincluye esos cuatro ejes, §17.3).",
+        "description": "Body de POST /api/glossaries (issues #39/#40 y §6.2).\n\n202 con glossary_id y URLs del trabajo, o 200 directo si hay caché\naprobada para esa combinación documento+perfil+idioma (la clave de caché\nincluye esos cuatro ejes, §17.3, y todas las fuentes en multidocumental).",
         "properties": {
           "document_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Document Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "document_ids": {
+            "description": "Lista de documentos para glosario multidocumental (§6.2).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Document Ids",
+            "type": "array"
           },
           "idioma_salida": {
             "$ref": "#/components/schemas/OutputLanguage"
@@ -1888,7 +1986,6 @@
           }
         },
         "required": [
-          "document_id",
           "perfil_destinatario",
           "idioma_salida"
         ],
@@ -2275,6 +2372,14 @@
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
           },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
+          },
           "evaluacion_calidad": {
             "$ref": "#/components/schemas/EvaluacionCalidad"
           },
@@ -2373,6 +2478,14 @@
           },
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
+          },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
           },
           "evaluacion_calidad": {
             "$ref": "#/components/schemas/EvaluacionCalidad"
@@ -2907,13 +3020,26 @@
       },
       "Referencia": {
         "additionalProperties": false,
-        "description": "Dónde verificar una afirmación dentro del documento original.\n\nToda tarjeta, pregunta, paso o escena cita su evidencia: un ``chunk_id``\n(identificador estable del fragmento, issue #12) y opcionalmente su\npágina y sección. La UI usa esto para el botón «Ver la fuente»\n(GET /api/documents/{id}/sources/{chunk_id}).",
+        "description": "Dónde verificar una afirmación dentro del documento original.\n\nToda tarjeta, pregunta, paso o escena cita su evidencia: un ``chunk_id``\n(identificador estable del fragmento, issue #12) y opcionalmente su\npágina y sección. En multidocumental (§5.1), ``document_id`` desambigua\nla fuente de procedencia.",
         "properties": {
           "chunk_id": {
             "description": "Fragmento de origen (issue #12).",
             "minLength": 1,
             "title": "Chunk Id",
             "type": "string"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Documento de origen del fragmento para citas desambiguadas.",
+            "title": "Document Id"
           },
           "pagina": {
             "anyOf": [
@@ -3005,6 +3131,14 @@
           },
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
+          },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
           },
           "evaluacion_calidad": {
             "$ref": "#/components/schemas/EvaluacionCalidad"
@@ -3108,6 +3242,14 @@
           },
           "documento_fuente": {
             "$ref": "#/components/schemas/DocumentoFuente"
+          },
+          "documentos_fuente": {
+            "description": "Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoFuente"
+            },
+            "title": "Documentos Fuente",
+            "type": "array"
           },
           "evaluacion_calidad": {
             "$ref": "#/components/schemas/EvaluacionCalidad"

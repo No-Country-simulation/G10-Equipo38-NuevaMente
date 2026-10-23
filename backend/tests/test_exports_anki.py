@@ -138,3 +138,22 @@ def test_cache_anki_no_reescribe_ni_cambia_entre_descargas(espacio_exportaciones
         primera = servicio.descargar(e.token, paquete.generation_id, formato)
         assert primera == servicio.descargar(e.token, paquete.generation_id, formato)
         assert e.storage.get(clave_export("ws_estudio", paquete.generation_id, formato)) == primera.contenido
+
+
+def test_exportar_anki_multidocumento(paquete):
+    from app.exports.anki import exportar_texto
+    from app.schemas.pedagogical import Referencia
+    from app.schemas.responses import DocumentoFuente
+
+    p = paquete.model_copy(deep=True)
+    f1 = DocumentoFuente(document_id="doc1", titulo="Doc 1", version="v1", hash="hash1")
+    f2 = DocumentoFuente(document_id="doc2", titulo="Doc 2", version="v2", hash="hash2")
+    p.documento_fuente = f1
+    p.documentos_fuente = [f1, f2]
+    p.contenido_adaptado.items[0].referencias = [
+        Referencia(document_id="doc1", chunk_id="chk1", pagina=1),
+        Referencia(document_id="doc2", chunk_id="chk2", pagina=2),
+    ]
+    csv_bytes = exportar_texto(p, "csv").decode("utf-8")
+    assert "doc_doc1" in csv_bytes
+    assert "doc_doc2" in csv_bytes

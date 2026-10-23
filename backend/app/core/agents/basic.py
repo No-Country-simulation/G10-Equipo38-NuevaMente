@@ -42,18 +42,24 @@ def ejecutar_basico(estado, grafo, investigador, escritor, persistir, *, bucket,
                     raise TrabajoCanceladoError()
                 raise FalloTrabajoError(estado.error.code, estado.error.message)
         autorizacion = supervisor(estado, grafo)
-        if autorizacion.get("error") or any(
-            autorizacion.get(k) != getattr(estado, k)
-            for k in ("source_hash", "documento_fuente", "idioma_origen", "secciones_disponibles")
-        ):
+        campos_reval = ["source_hash", "documento_fuente", "idioma_origen", "secciones_disponibles"]
+        if len(getattr(estado, "document_ids", None) or []) > 1:
+            campos_reval.extend(["source_hashes", "documentos_fuente"])
+        if autorizacion.get("error") or any(autorizacion.get(k) != getattr(estado, k) for k in campos_reval):
             raise FalloTrabajoError("INVALID_STATE", "La fuente cambió durante la generación.")
         borrador, referencias = validar_borrador(estado.borrador.model_dump_json(), estado)
         trazabilidad = estado.trazabilidad.model_dump()
         trazabilidad["modelo_verificacion"] = None
+        fuentes = (
+            [f.model_copy(deep=True) for f in estado.documentos_fuente]
+            if estado.documentos_fuente
+            else [estado.documento_fuente.model_copy(deep=True)]
+        )
         paquete = BasicPedagogicalOutput(
             generation_id=estado.generation_id,
             metadatos=borrador.metadatos,
             documento_fuente=estado.documento_fuente,
+            documentos_fuente=fuentes,
             contenido_adaptado=borrador.contenido_adaptado,
             evaluacion_calidad=EvaluacionNoRealizada(),
             referencias=referencias,

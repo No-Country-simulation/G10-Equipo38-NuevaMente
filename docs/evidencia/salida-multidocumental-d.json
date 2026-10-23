@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0",
+  "generation_id": "gen_7c318db5dfdb422f861b3a88ad0155a3",
+  "status": "aprobado",
+  "metadatos": {
+    "perfil_aplicado": "principiante",
+    "formato_generado": "flashcards",
+    "nicho_sector": "general",
+    "nivel_detalle": "didactico",
+    "idioma_origen": "es",
+    "idioma_salida": "es",
+    "conceptos_clave": [
+      "[SOURCE_CONCEPT]"
+    ],
+    "prerrequisitos": [],
+    "objetivos_aprendizaje": [
+      "[LEARNING_OBJECTIVE_FROM_SOURCE]"
+    ],
+    "tiempo_estimado_estudio_minutos": 1,
+    "alcance": {
+      "tipo": "multi_documento",
+      "seccion_id": null,
+      "document_ids": [
+        "doc_a9bfa1fc026e4a269b3ca3a2df427a40",
+        "doc_f72afc95d7944044bb76190ad4a1ecd5"
+      ],
+      "secciones_cubiertas": [
+        "seccion:1"
+      ]
+    }
+  },
+  "documento_fuente": {
+    "document_id": "doc_a9bfa1fc026e4a269b3ca3a2df427a40",
+    "titulo": "Arquitectura B",
+    "hash": "d751bc89242a21cfd4b570dcd5a037b0dda51f76677053911a8f0708b91e4767",
+    "version": "v1",
+    "procedencia": null
+  },
+  "documentos_fuente": [
+    {
+      "document_id": "doc_a9bfa1fc026e4a269b3ca3a2df427a40",
+      "titulo": "Arquitectura B",
+      "hash": "d751bc89242a21cfd4b570dcd5a037b0dda51f76677053911a8f0708b91e4767",
+      "version": "v1",
+      "procedencia": null
+    },
+    {
+      "document_id": "doc_f72afc95d7944044bb76190ad4a1ecd5",
+      "titulo": "Arquitectura A",
+      "hash": "0e22094db22a80c3a2b13a46c11f7fdc253510a6c9ddefadcf7392c1783ab3be",
+      "version": "v1",
+      "procedencia": null
+    }
+  ],
+  "contenido_adaptado": {
+    "tipo": "flashcards",
+    "titulo": "[SOURCE_TITLE]",
+    "introduccion_contextualizada": null,
+    "items": [
+      {
+        "id": "example_1",
+        "frente": "[SOURCE_CONCEPT]",
+        "dorso": "Vamos paso a paso: [SOURCE_EXPLANATION]. Analogía ilustrativa: [LABELED_ANALOGY].",
+        "pista_didactica": null,
+        "etiquetas": [],
+        "referencias": [
+          {
+            "chunk_id": "chk_5cf3fa0e424220ecbf140ecb",
+            "pagina": null,
+            "seccion": "documento.txt",
+            "document_id": "doc_a9bfa1fc026e4a269b3ca3a2df427a40"
+          }
+        ]
+      }
+    ]
+  },
+  "evaluacion_calidad": {
+    "anclaje_fuente_score": 1.0,
+    "cantidad_afirmaciones": 2,
+    "cantidad_respaldadas": 2,
+    "estado_evaluacion": "aprobada",
+    "claridad_pedagogica": "alta",
+    "adecuacion_perfil": "alta",
+    "cobertura_objetivos": "completa",
+    "coherencia_didactica": "alta",
+    "verificacion_visual": "no_aplica",
+    "observaciones": null,
+    "razones_bloqueo": []
+  },
+  "referencias": [
+    {
+      "chunk_id": "chk_5cf3fa0e424220ecbf140ecb",
+      "pagina": null,
+      "seccion": "documento.txt",
+      "document_id": "doc_a9bfa1fc026e4a269b3ca3a2df427a40"
+    }
+  ],
+  "created_at": "2026-10-22T23:17:35.110550Z",
+  "trazabilidad": {
+    "modelo_generacion": "gemini-2.5-flash",
+    "modelo_verificacion": "gemini-2.5-flash",
+    "modelo_embeddings": "gemini-embedding-2",
+    "prompt_version": "nm-prompts-1.1.4",
+    "parser_version": "config-sha256:4be5c606c9d0c76c1ba46fc199743a0005479fb05f7d7c3cf11fa78b403c78ef",
+    "retrieval": {
+      "k": 5,
+      "fetch_k": 15,
+      "lambda_mult": 0.7
+    }
+  },
+  "almacenamiento_oci": {
+    "bucket": "nuevamente-contenidos-educativos",
+    "objeto_id": "outputs/3f884636-42c1-4530-8ac2-aae6280b30b4/gen_7c318db5dfdb422f861b3a88ad0155a3/content.json"
+  }
+}

@@ -79,11 +79,15 @@ def exportar_texto(paquete, formato):
     salida.write("#columns:" + separador.join(("Front", "Back", "Tags", "GUID", "Deck")) + "\n")
     writer = csv.writer(salida, delimiter=separador, quoting=csv.QUOTE_ALL, lineterminator="\n")
     for tarjeta in mazo.items:
+        tags_tarjeta = list(tarjeta.etiquetas)
+        for r in getattr(tarjeta, "referencias", []):
+            if getattr(r, "document_id", None):
+                tags_tarjeta.append(f"doc_{r.document_id}")
         writer.writerow(
             (
                 _frente(paquete, tarjeta.frente),
                 campo_html(tarjeta.dorso),
-                " ".join(etiquetas(tarjeta.etiquetas)),
+                " ".join(etiquetas(tags_tarjeta)),
                 guid(paquete.generation_id, tarjeta.id),
                 nombre_mazo(paquete),
             )
@@ -103,11 +107,15 @@ def exportar_apkg(paquete):
     )
     deck = genanki.Deck(_id(paquete.generation_id, "mazo"), nombre_mazo(paquete))
     for tarjeta in mazo.items:
+        tags_tarjeta = list(tarjeta.etiquetas)
+        for r in getattr(tarjeta, "referencias", []):
+            if getattr(r, "document_id", None):
+                tags_tarjeta.append(f"doc_{r.document_id}")
         deck.add_note(
             genanki.Note(
                 model=modelo,
                 fields=[_frente(paquete, tarjeta.frente), campo_html(tarjeta.dorso)],
-                tags=etiquetas(tarjeta.etiquetas),
+                tags=etiquetas(tags_tarjeta),
                 guid=guid(paquete.generation_id, tarjeta.id),
             )
         )

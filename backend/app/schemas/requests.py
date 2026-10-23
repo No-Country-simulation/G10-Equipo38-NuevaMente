@@ -32,7 +32,10 @@ class GenerateRequest(ModeloContenido):
 
     model_config = ConfigDict(extra="forbid")
 
-    document_id: str = Field(min_length=1, description="Documento ready del espacio (§7.2).")
+    document_id: str | None = Field(default=None, description="Documento ready del espacio (§7.2).")
+    document_ids: list[str] = Field(
+        default_factory=list, description="Lista de documentos para multidocumental (§5.1)."
+    )
     perfil_destinatario: RecipientProfile
     formato_salida: PedagogicalFormat
     nicho_sector: IndustryNiche
@@ -40,14 +43,61 @@ class GenerateRequest(ModeloContenido):
     idioma_salida: OutputLanguage
     modo_generacion: Literal["multiagente", "basico"] = "multiagente"
     alcance: AlcanceSolicitud = Field(
-        default_factory=AlcanceSolicitud, description="Documento completo o sección explícita."
+        default_factory=AlcanceSolicitud, description="Documento completo, sección explícita o multi_documento."
     )
+
+    @model_validator(mode="after")
+    def _normalizar_fuentes(self) -> "GenerateRequest":
+        ids_limpios = []
+        if self.document_ids:
+            for item in self.document_ids:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError("Cada document_id en document_ids debe ser una cadena no vacía")
+                ids_limpios.append(item.strip())
+            self.document_ids = sorted(list(set(ids_limpios)))
+
+        if len(self.document_ids) > 5:
+            raise ValueError("No se permiten más de 5 documentos por solicitud")
+
+        if self.document_id is not None:
+            doc_id_limpio = self.document_id.strip()
+            if not doc_id_limpio:
+                raise ValueError("document_id no puede estar vacío")
+            self.document_id = doc_id_limpio
+            if self.document_ids:
+                primario = self.document_ids[0]
+                if self.document_id != primario:
+                    raise ValueError(
+                        f"document_id '{self.document_id}' contradictorio con el primario canónico '{primario}'"
+                    )
+            else:
+                self.document_ids = [self.document_id]
+        elif self.document_ids:
+            self.document_id = self.document_ids[0]
+        elif self.alcance.tipo != "espacio_completo":
+            raise ValueError("Debe especificarse document_id o document_ids")
+
+        if len(self.document_ids) > 1:
+            if self.alcance.tipo == "seccion":
+                raise ValueError("alcance.tipo='seccion' no admite múltiples fuentes")
+            if self.alcance.tipo == "documento_completo":
+                self.alcance.tipo = "multi_documento"
+            self.alcance.document_ids = list(self.document_ids)
+        elif len(self.document_ids) == 1 and self.alcance.tipo == "multi_documento":
+            raise ValueError("alcance multi_documento requiere al menos 2 fuentes")
+
+        return self
 
     def parametros_persistidos(self):
         datos = self.model_dump(mode="json")
         # Mantener la identidad idempotente de solicitudes anteriores al selector.
         if self.modo_generacion == "multiagente":
             datos.pop("modo_generacion")
+        # Conservar hash_cuerpo para peticiones históricas unidocumentales sin document_ids explícito:
+        if "document_ids" not in self.model_fields_set and len(self.document_ids) <= 1:
+            datos.pop("document_ids", None)
+            if "alcance" in datos and "document_ids" in datos["alcance"]:
+                datos["alcance"].pop("document_ids", None)
         return datos
 
 
@@ -86,18 +136,54 @@ class ChatRequest(ModeloContenido):
 
 
 class GlossaryRequest(ModeloContenido):
-    """Body de POST /api/glossaries (issues #39/#40).
+    """Body de POST /api/glossaries (issues #39/#40 y §6.2).
 
     202 con glossary_id y URLs del trabajo, o 200 directo si hay caché
     aprobada para esa combinación documento+perfil+idioma (la clave de caché
-    incluye esos cuatro ejes, §17.3).
+    incluye esos cuatro ejes, §17.3, y todas las fuentes en multidocumental).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    document_id: str = Field(min_length=1, max_length=128)
+    document_id: str | None = Field(default=None, max_length=128)
+    document_ids: list[str] = Field(
+        default_factory=list, description="Lista de documentos para glosario multidocumental (§6.2)."
+    )
     perfil_destinatario: RecipientProfile
     idioma_salida: OutputLanguage
+
+    @model_validator(mode="after")
+    def _normalizar_fuentes(self) -> "GlossaryRequest":
+        ids_limpios = []
+        if self.document_ids:
+            for item in self.document_ids:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError("Cada document_id en document_ids debe ser una cadena no vacía")
+                ids_limpios.append(item.strip())
+            self.document_ids = sorted(list(set(ids_limpios)))
+
+        if len(self.document_ids) > 5:
+            raise ValueError("No se permiten más de 5 documentos por solicitud")
+
+        if self.document_id is not None:
+            doc_id_limpio = self.document_id.strip()
+            if not doc_id_limpio:
+                raise ValueError("document_id no puede estar vacío")
+            self.document_id = doc_id_limpio
+            if self.document_ids:
+                primario = self.document_ids[0]
+                if self.document_id != primario:
+                    raise ValueError(
+                        f"document_id '{self.document_id}' contradictorio con el primario canónico '{primario}'"
+                    )
+            else:
+                self.document_ids = [self.document_id]
+        elif self.document_ids:
+            self.document_id = self.document_ids[0]
+        else:
+            raise ValueError("Debe especificarse document_id o document_ids")
+
+        return self
 
 
 class QuizAnswerRequest(ModeloContenido):

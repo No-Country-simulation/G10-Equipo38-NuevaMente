@@ -123,6 +123,18 @@ class Configuracion(BaseSettings):
     # ------------------------------------------------------------------
     data_dir: str = ".data"
     workspace_retention_days: int = Field(default=30, gt=0, le=30)
+    workspace_max_documents: int = Field(
+        default=5,
+        gt=0,
+        le=100,
+        description="Máximo de documentos conservados por espacio (techo operativo defensivo: 100).",
+    )
+    workspace_max_generations: int = Field(
+        default=20,
+        gt=0,
+        le=500,
+        description="Máximo de generaciones conservadas por espacio (techo operativo defensivo: 500).",
+    )
     session_max_hours: int = Field(default=24, gt=0, le=24)
     max_generation_attempts: int = Field(default=3, ge=1, le=3)
     generation_deadline_seconds: int = Field(default=300, gt=0)

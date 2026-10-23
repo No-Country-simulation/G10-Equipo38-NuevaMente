@@ -37,7 +37,7 @@ segundo contrato de salida.
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 # -----------------------------------------------------------------------------
 # Piezas compartidas por varios formatos
@@ -61,8 +61,8 @@ class Referencia(ModeloContenido):
 
     Toda tarjeta, pregunta, paso o escena cita su evidencia: un ``chunk_id``
     (identificador estable del fragmento, issue #12) y opcionalmente su
-    página y sección. La UI usa esto para el botón «Ver la fuente»
-    (GET /api/documents/{id}/sources/{chunk_id}).
+    página y sección. En multidocumental (§5.1), ``document_id`` desambigua
+    la fuente de procedencia.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -70,36 +70,63 @@ class Referencia(ModeloContenido):
     chunk_id: str = Field(min_length=1, description="Fragmento de origen (issue #12).")
     pagina: int | None = Field(default=None, ge=1, description="Página del documento original.")
     seccion: str | None = Field(default=None, description="Sección/título del documento original.")
+    document_id: str | None = Field(
+        default=None, min_length=1, description="Documento de origen del fragmento para citas desambiguadas."
+    )
+
+    @model_serializer(mode="wrap")
+    def _serializar(self, handler):
+        datos = handler(self)
+        if isinstance(datos, dict) and datos.get("document_id") is None:
+            datos.pop("document_id", None)
+        return datos
 
 
 class AlcanceSolicitud(ModeloContenido):
-    """Qué parte del documento se adapta (§16.1).
+    """Qué parte del documento se adapta (§16.1 y §5.1).
 
     Se usa DOS veces con el mismo modelo: en la petición de generación
-    (``{"tipo": "documento_completo"}`` o ``{"tipo": "seccion",
-    "seccion_id": "sec_3"}``). La subclase de salida ``Alcance``, dentro de
-    ``metadatos``, agrega ``secciones_cubiertas`` para declarar la cobertura
-    real lograda (contratos-api.md: "alcance conserva la estructura de
-    entrada y agrega secciones cubiertas; no alterna objeto/string").
+    (``{"tipo": "documento_completo"}``, ``{"tipo": "seccion", "seccion_id": "sec_3"}``,
+    ``{"tipo": "multi_documento"}`` o ``{"tipo": "espacio_completo"}``). La subclase de
+    salida ``Alcance``, dentro de ``metadatos``, agrega ``secciones_cubiertas``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    tipo: Literal["documento_completo", "seccion"] = Field(
+    tipo: Literal["documento_completo", "seccion", "multi_documento", "espacio_completo"] = Field(
         default="documento_completo",
-        description="documento_completo es el valor por defecto; seccion exige seccion_id.",
+        description="documento_completo es el valor por defecto; seccion exige seccion_id; multi_documento exige 2+ fuentes.",
     )
     seccion_id: str | None = Field(
         default=None,
-        description="Obligatorio cuando tipo=seccion; ignorado en documento_completo.",
+        description="Obligatorio cuando tipo=seccion; ignorado en otros.",
+    )
+    document_ids: list[str] = Field(
+        default_factory=list,
+        description="Fuentes explícitas para multi_documento o espacio_completo resuelto.",
     )
 
     @model_validator(mode="after")
-    def _seccion_exige_seccion_id(self) -> "AlcanceSolicitud":
+    def _validar_alcance(self) -> "AlcanceSolicitud":
         """Validación semántica: elegir 'seccion' sin decir cuál es un error."""
+        if len(self.document_ids) > 5:
+            raise ValueError("No se permiten más de 5 documentos por solicitud")
         if self.tipo == "seccion" and (not self.seccion_id or not self.seccion_id.strip()):
             raise ValueError("alcance.tipo='seccion' exige seccion_id no vacío")
+        if self.tipo == "seccion" and len(self.document_ids) > 1:
+            raise ValueError("alcance.tipo='seccion' no admite múltiples documentos")
+        if self.tipo == "multi_documento" and self.document_ids and len(self.document_ids) < 2:
+            raise ValueError("alcance.tipo='multi_documento' requiere al menos 2 documentos")
+        if self.tipo == "documento_completo" and len(self.document_ids) > 1:
+            raise ValueError("alcance.tipo='documento_completo' no admite más de un documento")
         return self
+
+    @model_serializer(mode="wrap")
+    def _serializar(self, handler):
+        datos = handler(self)
+        if isinstance(datos, dict) and not datos.get("document_ids"):
+            datos.pop("document_ids", None)
+        return datos
 
 
 class Alcance(AlcanceSolicitud):

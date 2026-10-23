@@ -197,4 +197,63 @@ describe('aislamiento del tutor', () => {
     await send();
     await screen.findByText('Respuesta sintética verificada');
   });
+
+  it('envía document_ids ordenados al tutor cuando se especifican múltiples fuentes', async () => {
+    const api = setup({
+      job_id: 'job-m', status: 'completed', result: {
+        document_id: 'doc-a', document_ids: ['doc-a', 'doc-b'], document_hash: 'a'.repeat(64),
+        pregunta: '¿Qué es una red?', perfil_destinatario: 'principiante', idioma_salida: 'es',
+        estado: 'respondida', respuesta: 'Respuesta multidocumental', referencias: [{ chunk_id: 'chunk', document_id: 'doc-a' }],
+        evaluacion_calidad: fixtures.flashcards.evaluacion_calidad,
+      }
+    });
+    render(<ChatTutorView {...base} apiClient={api} documentId="doc-a" documentIds={['doc-b', 'doc-a']} />);
+    await send();
+    await screen.findByText('Respuesta multidocumental');
+    expect(api.createChat).toHaveBeenCalledWith(
+      'synthetic-token',
+      expect.objectContaining({
+        document_id: 'doc-a',
+        document_ids: ['doc-a', 'doc-b'],
+      }),
+      expect.any(String)
+    );
+  });
+
+  it('envía document_ids al glosario cuando se especifican múltiples fuentes', async () => {
+    const api = {
+      getDocument: vi.fn().mockResolvedValue({ status: 'ready' }),
+      createGlossary: vi.fn().mockResolvedValue({ job_id: 'glos-m', glossary_id: 'glos-m', status: 'completed' }),
+      getGlossary: vi.fn().mockResolvedValue({
+        glossary_id: 'glos-m', documento_fuente: { document_id: 'doc-a' },
+        documentos_fuente: [{ document_id: 'doc-a' }, { document_id: 'doc-b' }],
+        perfil_destinatario: 'principiante', idioma_salida: 'es', estado: 'verificado', candidatos_omitidos: 0,
+        evaluacion_calidad: fixtures.flashcards.evaluacion_calidad, trazabilidad: fixtures.flashcards.trazabilidad,
+        terminos: [{ id: 'term-m', termino_original: 'VCN', es_identificador: true, traduccion: null, estado: 'definido',
+          definicion: 'Definición multidocumental', limitacion: null, referencias: [{ chunk_id: 'chunk', document_id: 'doc-b' }] }],
+      }),
+    } as unknown as APIClient;
+    render(
+      <GlossaryView
+        apiClient={api}
+        token="synthetic-token"
+        documentId="doc-a"
+        documentIds={['doc-b', 'doc-a']}
+        perfil="principiante"
+        idiomaSalida="es"
+        idiomaUi="es"
+        onSessionInvalid={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: t('glosario.generar', 'es') }));
+    await screen.findByText('Definición multidocumental');
+    expect(api.createGlossary).toHaveBeenCalledWith(
+      'synthetic-token',
+      expect.objectContaining({
+        document_id: 'doc-a',
+        document_ids: ['doc-a', 'doc-b'],
+      }),
+      expect.any(String)
+    );
+  });
 });

@@ -382,3 +382,169 @@ def test_migraciones_aplican_una_vez(ruta_db):
     assert segundo.version_esquema() == VERSION_ESQUEMA
     assert segundo.obtener_workspace("ws_1") is not None  # el estado sigue
     segundo.cerrar()
+
+
+def test_registro_operativo_limites_defaults_y_personalizados(tmp_path):
+    # Default retrocompatible
+    store_default = RegistroOperativo(tmp_path / "default.sqlite3")
+    try:
+        assert store_default.limite_documentos == 5
+        assert store_default.limite_generaciones == 20
+        store_default.crear_workspace("ws_def", "codigo", 30)
+        uso = store_default.uso_espacio("ws_def")
+        assert uso["limite_documentos"] == 5
+        assert uso["limite_generaciones"] == 20
+    finally:
+        store_default.cerrar()
+
+    # Personalizado
+    store_custom = RegistroOperativo(
+        tmp_path / "custom.sqlite3",
+        limite_documentos=3,
+        limite_generaciones=7,
+    )
+    try:
+        assert store_custom.limite_documentos == 3
+        assert store_custom.limite_generaciones == 7
+        store_custom.crear_workspace("ws_cust", "codigo", 30)
+        uso = store_custom.uso_espacio("ws_cust")
+        assert uso["limite_documentos"] == 3
+        assert uso["limite_generaciones"] == 7
+    finally:
+        store_custom.cerrar()
+
+
+def test_comprobar_limite_recursos_dinamico_y_override(store):
+    from app.schemas.errors import ErrorAplicacion, ErrorCode
+
+    store.crear_workspace("ws_dyn", "codigo", 30)
+    store.limite_documentos = 2
+    store.registrar_documento("doc_d1", "ws_dyn", "Doc 1", DocumentStatus.READY, "hash1")
+    store.registrar_documento("doc_d2", "ws_dyn", "Doc 2", DocumentStatus.READY, "hash2")
+
+    # Sin límite explícito usa el dinámico configurado (2)
+    with pytest.raises(ErrorAplicacion) as exc:
+        store.comprobar_limite_recursos("ws_dyn", "documents")
+    assert exc.value.error.code == ErrorCode.RATE_LIMITED
+    assert exc.value.error.details["limite"] == 2
+    assert exc.value.error.details["usados"] == 2
+
+    # Override explícito permite comprobar contra otro umbral
+    store.comprobar_limite_recursos("ws_dyn", "documents", limite=5)
+
+    # Validaciones defensivas del parámetro limite
+    with pytest.raises(ValueError, match="entero positivo"):
+        store.comprobar_limite_recursos("ws_dyn", "documents", limite=0)
+    with pytest.raises(ValueError, match="entero positivo"):
+        store.comprobar_limite_recursos("ws_dyn", "documents", limite=-2)
+    with pytest.raises(ValueError, match="entero positivo"):
+        store.comprobar_limite_recursos("ws_dyn", "documents", limite=True)
+    with pytest.raises(ValueError, match="entero positivo"):
+        store.comprobar_limite_recursos("ws_dyn", "documents", limite=3.14)
+
+
+def test_comprobar_limite_concurrencia_hilos(tmp_path):
+    import concurrent.futures
+
+    from app.schemas.errors import ErrorAplicacion
+
+    store = RegistroOperativo(tmp_path / "concurrente.sqlite3", limite_documentos=2)
+    try:
+        store.crear_workspace("ws_conc", "codigo", 30)
+        exitos = 0
+        bloqueados = 0
+
+        def intentar_registrar(indice: int):
+            try:
+                with store.transaccion():
+                    store.comprobar_limite_recursos("ws_conc", "documents")
+                    store.registrar_documento(
+                        f"doc_conc_{indice}", "ws_conc", f"Doc {indice}", DocumentStatus.READY, f"hash_{indice}"
+                    )
+                return True
+            except ErrorAplicacion:
+                return False
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            resultados = list(pool.map(intentar_registrar, range(10)))
+
+        exitos = sum(1 for r in resultados if r is True)
+        bloqueados = sum(1 for r in resultados if r is False)
+
+        assert exitos == 2
+        assert bloqueados == 8
+        assert store.uso_espacio("ws_conc")["documentos"] == 2
+    finally:
+        store.cerrar()
+
+
+def test_reservar_admision_documental_concurrente_con_clave_compartida_en_limite(tmp_path):
+    import concurrent.futures
+
+    from app.schemas.documents import MetadatosDocumento
+    from app.schemas.errors import ErrorAplicacion, ErrorCode
+
+    store = RegistroOperativo(tmp_path / "idemp_concurrente.sqlite3", limite_documentos=2)
+    try:
+        ws_id = "ws_idemp"
+        token = "token_idemp_123"
+        store.crear_workspace(ws_id, "codigo", 30)
+        store.crear_sesion(token, ws_id, 30)
+
+        # 1er documento existente (espacio queda en límite - 1 = 1)
+        store.registrar_documento("doc_existente", ws_id, "Doc 0", DocumentStatus.READY, "hash0")
+        assert store.uso_espacio(ws_id)["documentos"] == 1
+
+        from datetime import datetime, timezone
+
+        metadatos = MetadatosDocumento(
+            extension="txt",
+            tamano_bytes=100,
+            creado_en=datetime.now(timezone.utc),
+        )
+
+        def intentar_admision_idempotente():
+            return store.reservar_admision_documental(
+                token=token,
+                document_id="doc_idemp_test",
+                job_id="job_idemp_test",
+                titulo="Doc Compartido",
+                source_name="compartido.txt",
+                hash_documento="hash_comp",
+                metadatos=metadatos,
+                cuerpo='{"titulo": "Doc Compartido"}',
+                clave="clave_compartida_limite",
+            )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            f1 = pool.submit(intentar_admision_idempotente)
+            f2 = pool.submit(intentar_admision_idempotente)
+            res1 = f1.result()
+            res2 = f2.result()
+
+        nuevas = sum(1 for r in (res1, res2) if r[1] is True)
+        duplicadas = sum(1 for r in (res1, res2) if r[1] is False)
+        assert nuevas == 1
+        assert duplicadas == 1
+        assert res1[0]["document_id"] == res2[0]["document_id"]
+        assert store.uso_espacio(ws_id)["documentos"] == 2
+
+        # Al pasar la admisión a encolada, un tercer intento con otra clave falla con RATE_LIMITED
+        store._conn.execute("UPDATE document_admissions SET estado='encolada' WHERE workspace_id=?", (ws_id,))
+        with pytest.raises(ErrorAplicacion) as exc:
+            store.reservar_admision_documental(
+                token=token,
+                document_id="doc_excedente",
+                job_id="job_excedente",
+                titulo="Doc Excedente",
+                source_name="excedente.txt",
+                hash_documento="hash_exc",
+                metadatos=metadatos,
+                cuerpo='{"titulo": "Doc Excedente"}',
+                clave="clave_diferente",
+            )
+        assert exc.value.error.code == ErrorCode.RATE_LIMITED
+        assert exc.value.error.details["limite"] == 2
+        assert exc.value.error.details["usados"] == 2
+    finally:
+        store.cerrar()

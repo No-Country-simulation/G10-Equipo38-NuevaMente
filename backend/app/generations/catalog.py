@@ -82,14 +82,19 @@ class CatalogoGeneraciones:
         if fila is None or fila["workspace_id"] != sesion["workspace_id"]:
             raise ErrorAplicacion(ErrorCode.NOT_FOUND, "Generación no encontrada.")
         _, manifest = self.espacio(token)
+        doc_ids = self.db.documentos_generacion(generation_id) or [fila["document_id"]]
         if any(
-            (r.recurso_tipo, r.recurso_id) in {("generation", generation_id), ("document", fila["document_id"])}
+            (r.recurso_tipo == "generation" and r.recurso_id == generation_id)
+            or (r.recurso_tipo == "document" and r.recurso_id in doc_ids)
             for r in manifest.recursos_borrados
         ):
             raise ErrorAplicacion(ErrorCode.NOT_FOUND, "Generación no encontrada.")
         if fila["status"] != "completed":
             raise ErrorAplicacion(ErrorCode.INVALID_STATE, "La generación no está completada.")
         fuente = self.consulta.fuente_aprobada(token, fila["document_id"])
+        for d_id in doc_ids:
+            if d_id != fila["document_id"]:
+                self.consulta.fuente_aprobada(token, d_id)
         if self.db.obtener_sesion(token) is None:
             raise ErrorAplicacion(ErrorCode.SESSION_INVALID, "La sesión dejó de estar disponible.")
         actual = self.db.obtener_generacion(generation_id)
@@ -108,3 +113,8 @@ class CatalogoGeneraciones:
         _, fuente = self.fuente(token, paquete.generation_id)
         if fuente != paquete.documento_fuente:
             raise ErrorAplicacion(ErrorCode.INVALID_STATE, "La fuente cambió durante la consulta.")
+        if paquete.documentos_fuente:
+            for doc_f in paquete.documentos_fuente:
+                actual_f = self.consulta.fuente_aprobada(token, doc_f.document_id)
+                if actual_f != doc_f:
+                    raise ErrorAplicacion(ErrorCode.INVALID_STATE, "Una fuente secundaria cambió durante la consulta.")

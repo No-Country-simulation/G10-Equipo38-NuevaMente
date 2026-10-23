@@ -27,7 +27,12 @@ def detectar_candidatos(chunks, *, chequear=lambda: None):
     encontrados = {}
     for chunk in chunks:
         chequear()
-        referencia = Referencia(chunk_id=chunk.chunk_id, pagina=chunk.pagina, seccion=chunk.seccion)
+        referencia = Referencia(
+            document_id=getattr(chunk, "document_id", None),
+            chunk_id=chunk.chunk_id,
+            pagina=chunk.pagina,
+            seccion=chunk.seccion,
+        )
         for patron, identificador in _PATRONES:
             for match in patron.finditer(chunk.texto):
                 termino = match.group(1) if patron.groups else match.group()

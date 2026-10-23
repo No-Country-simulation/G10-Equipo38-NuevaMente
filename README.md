@@ -390,7 +390,7 @@ Conservar el volumen y el nombre de proyecto; no usar opciones de eliminación d
    historial del espacio y sus materiales. La biblioteca compartida permite
    consultar ejemplos previos; generar directamente desde esas fuentes sigue pendiente.
 
-## Escenarios A/B/C vigentes: misma fuente VCN v2
+## Escenarios de evidencia: A/B/C unidocumentales y D multidocumental
 
 La [evidencia real local de #55 v2](docs/evidencia/issue-55/v2/README.md) registra
 tres adaptaciones del mismo [PDF VCN v2](documents/redes_vcn_oci.pdf), con el mismo
@@ -398,18 +398,23 @@ ID de documento y SHA-256 verificado:
 `fd57e3548ca593f167c297e2ad9bbcf2297bdb87985d003037d4afc5b5cc4d2e`.
 En las tres, detalle `didactico` y alcance `documento_completo`.
 
-| Escenario | Perfil · formato · sector · idioma | JSON de entrada reconstruido | JSON canónico de salida |
-|---|---|---|---|
-| A | Principiante · flashcards · general · ES | [Reconstrucción A](docs/evidencia/issue-57/entrada-vcn-a.reconstruida.json) | No localizado |
-| B | Junior/Semi Senior · tutorial · e-commerce · EN | [Reconstrucción B](docs/evidencia/issue-57/entrada-vcn-b.reconstruida.json) | No localizado |
-| C | Ejecutivo · resumen ejecutivo · fintech · PT | [Reconstrucción C](docs/evidencia/issue-57/entrada-vcn-c.reconstruida.json) | No localizado |
+A ellos se incorpora el **Escenario D** para verificar la síntesis multidocumental (§8.2 del plan correctivo).
+Ilustra la resolución simultánea de múltiples fuentes con procedencia por cita (`document_id`), pero su
+JSON proviene de una **simulación con dobles de prueba** sobre fuentes sintéticas: la ejecución real con
+proveedores exigida por §8.2 sigue pendiente y no se presenta como realizada:
 
-Las entradas copian los parámetros históricos del catálogo, validados contra el
-contrato actual; **no son capturas HTTP originales**. No agregan campos ausentes:
-omitir `modo_generacion` selecciona Multiagente por defecto en el contrato.
-**Faltan los tres paquetes canónicos de salida**, cuyos bytes deben coincidir con
-los hashes registrados. Catálogo/informe, resultados VCN v1 y materiales sintéticos
-de las capturas no sustituyen esas salidas.
+| Escenario | Alcance · Perfil · formato · sector · idioma | Fuentes utilizadas | JSON canónico de salida | SHA-256 verificado |
+|---|---|---|---|---|
+| A | 1 doc · Principiante · flashcards · general · ES | `redes_vcn_oci.pdf` | [Reconstrucción A](docs/evidencia/issue-57/entrada-vcn-a.reconstruida.json) | `83c654ea...` (esperado) |
+| B | 1 doc · Junior/Semi Senior · tutorial · e-commerce · EN | `redes_vcn_oci.pdf` | [Reconstrucción B](docs/evidencia/issue-57/entrada-vcn-b.reconstruida.json) | `6528583a...` (esperado) |
+| C | 1 doc · Ejecutivo · resumen ejecutivo · fintech · PT | `redes_vcn_oci.pdf` | [Reconstrucción C](docs/evidencia/issue-57/entrada-vcn-c.reconstruida.json) | `ea0ec80d...` (esperado) |
+| D | 2 docs · Principiante · flashcards · general · ES | Arquitectura A + Arquitectura B (simuladas) | [Salida D](docs/evidencia/salida-multidocumental-d.json) | `9806ff5ddec0e919cb4f10213cfa92cdfe53575700183d8bc296585341c77107` (simulación con dobles; ejecución real pendiente) |
+
+Las entradas de A/B/C copian los parámetros históricos del catálogo, validados contra el
+contrato actual; **no son capturas HTTP originales**.
+El Escenario D demuestra la mecánica de síntesis cruzada multidocumental y citas referenciadas
+por fuente; su evidencia es simulada y su huella identifica los bytes exactos conservados en el
+repositorio (los tests nunca la regeneran).
 [Inventario y huellas esperadas](docs/evidencia/issue-57/README.md#escenarios-reales-abc-vcn-v2).
 
 ## Cumplimiento y evidencia disponible

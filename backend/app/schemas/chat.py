@@ -6,12 +6,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.enums import OutputLanguage, RecipientProfile
 from app.schemas.pedagogical import Referencia
-from app.schemas.responses import EvaluacionCalidad
+from app.schemas.responses import DocumentoFuente, EvaluacionCalidad
 
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    document_id: str = Field(min_length=1, max_length=128)
+    document_id: str | None = Field(default=None, max_length=128)
+    document_ids: list[str] = Field(
+        default_factory=list, description="Lista de documentos para multidocumental (§6.1)."
+    )
     pregunta: str = Field(min_length=1, max_length=2000)
     perfil_destinatario: RecipientProfile
     idioma_salida: OutputLanguage
@@ -22,6 +25,39 @@ class ChatRequest(BaseModel):
         if not valor.strip():
             raise ValueError("La pregunta no puede estar vacía")
         return valor.strip()
+
+    @model_validator(mode="after")
+    def _normalizar_fuentes(self) -> "ChatRequest":
+        ids_limpios = []
+        if self.document_ids:
+            for item in self.document_ids:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError("Cada document_id en document_ids debe ser una cadena no vacía")
+                ids_limpios.append(item.strip())
+            self.document_ids = sorted(list(set(ids_limpios)))
+
+        if len(self.document_ids) > 5:
+            raise ValueError("No se permiten más de 5 documentos por solicitud")
+
+        if self.document_id is not None:
+            doc_id_limpio = self.document_id.strip()
+            if not doc_id_limpio:
+                raise ValueError("document_id no puede estar vacío")
+            self.document_id = doc_id_limpio
+            if self.document_ids:
+                primario = self.document_ids[0]
+                if self.document_id != primario:
+                    raise ValueError(
+                        f"document_id '{self.document_id}' contradictorio con el primario canónico '{primario}'"
+                    )
+            else:
+                self.document_ids = [self.document_id]
+        elif self.document_ids:
+            self.document_id = self.document_ids[0]
+        else:
+            raise ValueError("Debe especificarse document_id o document_ids")
+
+        return self
 
 
 class BorradorChat(BaseModel):
@@ -44,6 +80,8 @@ class ChatAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     document_id: str
     document_hash: str
+    document_ids: list[str] = Field(default_factory=list)
+    documentos_fuente: list[DocumentoFuente] = Field(default_factory=list)
     pregunta: str
     perfil_destinatario: RecipientProfile
     idioma_salida: OutputLanguage
@@ -54,6 +92,8 @@ class ChatAnswer(BaseModel):
 
     @model_validator(mode="after")
     def aprobacion(self):
+        if not self.document_ids and self.document_id:
+            self.document_ids = [self.document_id]
         if self.estado == "respondida" and (
             not self.referencias
             or self.evaluacion_calidad is None

@@ -249,6 +249,15 @@ def ejemplo_few_shot(perfil: RecipientProfile, formato: PedagogicalFormat, idiom
 
 def cargar_plantilla(solicitud: GenerateRequest | dict) -> PlantillasPrompts:
     solicitud = GenerateRequest.model_validate(solicitud)
+    es_multidocumento = len(solicitud.document_ids) > 1
+    instruccion_multidocumento = (
+        "Síntesis multidocumental obligatoria: integrar de forma comparativa y coherente las múltiples fuentes autorizadas. "
+        "Contrastar perspectivas o aspectos complementarios de cada fuente según la evidencia provista. "
+        "Citar fielmente los fragmentos de origen (chunk_id) correspondientes a cada afirmación, preservando qué fuente aporta cada hecho. "
+        "No inventar consensos ni mezclar afirmaciones de fuentes diferentes bajo una sola cita.\n"
+        if es_multidocumento
+        else ""
+    )
     adaptacion = (
         f"Idioma de salida: {_IDIOMAS[solicitud.idioma_salida]}. El idioma de origen no cambia esta elección.\n"
         f"Perfil: {_PERFILES[solicitud.perfil_destinatario]}\n"
@@ -261,6 +270,7 @@ def cargar_plantilla(solicitud: GenerateRequest | dict) -> PlantillasPrompts:
         "Rol: Writer pedagógico. Redactar un borrador JSON estricto, sin cercas Markdown.\n"
         + _POLITICA
         + adaptacion
+        + instruccion_multidocumento
         + "Generar conceptos clave, prerrequisitos, objetivos y tiempo estimado antes de Critic. "
         "Respetar el alcance solicitado, no afirmar cobertura que la evidencia no permite. "
         "No fabricar IDs de sistema, hashes, timestamps, evaluación ni información de persistencia. "
@@ -305,6 +315,7 @@ def preparar_prompts(
     metadatos: Metadatos | None = None,
     evaluacion_factual: ResultadoFidelidad | None = None,
     feedback: Sequence[str] = (),
+    source_hashes: dict[str, str] | None = None,
 ) -> PromptsGeneracion:
     """Empaqueta datos separados del sistema; no autentica sesiones ni llama al LLM.
 
@@ -320,14 +331,19 @@ def preparar_prompts(
         raise ValueError("Se requiere evidencia autorizada para preparar los prompts")
     if (contenido is None) != (metadatos is None):
         raise ValueError("La revisión requiere contenido y metadatos juntos")
+
+    doc_ids_autorizados = set(solicitud.document_ids or ([solicitud.document_id] if solicitud.document_id else []))
+    hashes_autorizados = source_hashes or ({solicitud.document_id: source_hash} if solicitud.document_id else {})
+
     chunks = {}
     for item in evidencia:
         item = EvidenciaRecuperada.model_validate(item)
         chunk = item.chunk
+        expected_hash = hashes_autorizados.get(chunk.document_id, source_hash)
         if (
             chunk.workspace_id != workspace_id
-            or chunk.document_id != solicitud.document_id
-            or chunk.document_hash != source_hash
+            or chunk.document_id not in doc_ids_autorizados
+            or chunk.document_hash != expected_hash
         ):
             raise ValueError("La evidencia no corresponde al documento, versión y espacio autorizados")
         serializado = item.model_dump(mode="json")
@@ -339,6 +355,8 @@ def preparar_prompts(
         "parametros": solicitud.model_dump(mode="json"),
         "idioma_origen": idioma_origen,
         "source_hash": source_hash,
+        "source_hashes": hashes_autorizados,
+        "document_ids": list(doc_ids_autorizados),
         "evidencia": list(chunks.values()),
         "referencias_permitidas": [item.como_referencia().model_dump(mode="json") for item in evidencia],
         "feedback": TypeAdapter(list[str]).validate_python(feedback),

@@ -89,6 +89,8 @@ def writer(estado: EstadoGrafo, dependencias: DependenciasWriter) -> dict:
             restricciones.get("source_hash") != estado.source_hash
             or restricciones.get("documento_fuente") != estado.documento_fuente
             or restricciones.get("idioma_origen") != estado.idioma_origen
+            or restricciones.get("documentos_fuente") != estado.documentos_fuente
+            or restricciones.get("source_hashes") != estado.source_hashes
         ):
             return fallo("INVALID_STATE", "La versión de la fuente cambió durante la generación.")
         if estado.rubrica is not None and (
@@ -133,6 +135,7 @@ def writer(estado: EstadoGrafo, dependencias: DependenciasWriter) -> dict:
                 idioma_origen=estado.idioma_origen,
                 evidencia=estado.evidencia,
                 feedback=feedback,
+                source_hashes=estado.source_hashes,
             )
             datos = json.loads(prompts.writer.datos_json)
             datos["restricciones"] = estado.restricciones.model_dump(mode="json")

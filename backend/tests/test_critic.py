@@ -13,11 +13,12 @@ from app.config import Configuracion
 from app.core.agents.critic import DependenciasCritic, critic
 from app.core.agents.critic_contracts import ImagenOriginal
 from app.core.agents.gemini_generation import ClienteGeminiGeneracion
-from app.core.agents.graph_state import DependenciasGrafo
+from app.core.agents.graph_state import DependenciasGrafo, DocumentoGeneracion
 from app.core.agents.writer import writer
 from app.jobs.manager import CuotaAgotadaError, CuotasModelo, CuotasProveedor, ReintentableError
 from app.schemas.enums import PedagogicalFormat
 from app.schemas.internal import VerificacionVisual
+from app.schemas.responses import DocumentoFuente
 from doubles.gemini import DobleGemini
 from google.genai import types
 from test_writer import aplicar, estado_inicial, respuesta
@@ -475,6 +476,65 @@ def test_visual_adjunta_original_y_reserva_tokens(entorno):
     assert solicitud["response_json_schema"]["properties"]["chunk_id"]["enum"] == [imagen.chunk_id]
     assert nuevo.presupuesto.usadas == 5
     assert deps.grafo.ejecucion.cuotas._tokens["juez-test"][-1][1] > imagen.tokens_estimados
+
+
+def test_critic_visual_multidocumental_soporta_fuentes_secundarias(entorno):
+    estado, deps, _ = preparar_visual(entorno)
+    doc_sec = DocumentoGeneracion(
+        workspace_id=estado.workspace_id,
+        fuente=DocumentoFuente(
+            document_id="doc_test_secundario",
+            titulo="Fuente 2",
+            hash="sha256:secundario",
+            version="v1",
+        ),
+        estado="ready",
+        idioma_origen="en",
+        secciones=("sec_2",),
+        contiene_material_visual=True,
+    )
+    docs_map = {
+        "doc_test": entorno[2],
+        "doc_test_secundario": doc_sec,
+    }
+    grafo_multi = DependenciasGrafo(deps.grafo.ejecucion, lambda ws, d_id: docs_map.get(d_id))
+
+    estado.parametros = estado.parametros.model_copy(update={"document_ids": ["doc_test", "doc_test_secundario"]})
+    estado.document_ids = ["doc_test", "doc_test_secundario"]
+    estado.source_hashes = {"doc_test": "sha256:test", "doc_test_secundario": "sha256:secundario"}
+    estado.documentos_fuente = [entorno[2].fuente, doc_sec.fuente]
+    estado.secciones_por_documento = {
+        "doc_test": tuple(entorno[2].secciones),
+        "doc_test_secundario": tuple(doc_sec.secciones),
+    }
+    estado.idiomas_origen = {"doc_test": "en", "doc_test_secundario": "en"}
+
+    chunk_visual = estado.evidencia[0].chunk
+    chunk_visual.document_id = "doc_test_secundario"
+    chunk_visual.document_hash = "sha256:secundario"
+
+    llamadas_loader = []
+
+    def loader_visual(ws, doc_id, h, chunk_id):
+        llamadas_loader.append((ws, doc_id, h, chunk_id))
+        return ImagenOriginal(
+            workspace_id=ws,
+            document_id=doc_id,
+            source_hash=h,
+            chunk_id=chunk_id,
+            contenido=PNG,
+            mime_type="image/png",
+            tokens_estimados=2048,
+        )
+
+    deps_multi = DependenciasCritic(grafo_multi, deps.proveedor, deps.configuracion, loader_visual)
+    juez(deps.proveedor)
+    nuevo = aplicar(estado, critic(estado, deps_multi))
+    assert nuevo.destino_revision == "finalizer"
+    assert nuevo.evaluacion_visual[0].estado == "aprobada"
+    assert nuevo.evaluacion_pedagogica.verificacion_visual == "aprobada"
+    assert len(llamadas_loader) == 1
+    assert llamadas_loader[0] == ("ws_test", "doc_test_secundario", "sha256:secundario", chunk_visual.chunk_id)
 
 
 def test_interpretacion_ambigua_bloquea_aunque_fidelidad_textual_sea_alta(entorno):

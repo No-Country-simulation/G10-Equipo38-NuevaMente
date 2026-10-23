@@ -4,8 +4,14 @@
   "workspace_id": "ws_1",
   "generation_id": "gen_1",
   "document_id": "doc_1",
+  "document_ids": [
+    "doc_1"
+  ],
   "parametros": {
     "document_id": "doc_1",
+    "document_ids": [
+      "doc_1"
+    ],
     "perfil_destinatario": "principiante",
     "formato_salida": "flashcards",
     "nicho_sector": "general",
@@ -24,12 +30,33 @@
     "version": "v1",
     "procedencia": null
   },
+  "documentos_fuente": [
+    {
+      "document_id": "doc_1",
+      "titulo": "Documento técnico",
+      "hash": "sha256:abc",
+      "version": "v1",
+      "procedencia": null
+    }
+  ],
   "source_hash": "sha256:abc",
+  "source_hashes": {
+    "doc_1": "sha256:abc"
+  },
   "idioma_origen": "en",
+  "idiomas_origen": {
+    "doc_1": "en"
+  },
   "secciones_disponibles": [
     "sec_1",
     "sec_2"
   ],
+  "secciones_por_documento": {
+    "doc_1": [
+      "sec_1",
+      "sec_2"
+    ]
+  },
   "secciones_cubiertas": [],
   "evidencia": [],
   "referencias": [],

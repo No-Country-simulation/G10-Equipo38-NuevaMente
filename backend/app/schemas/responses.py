@@ -27,7 +27,16 @@ from datetime import datetime
 from math import isclose
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    TypeAdapter,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from app.schemas.enums import (
     DetailLevel,
@@ -204,6 +213,10 @@ class PaqueteEducativoBase(ModeloContenido):
     status: Literal["aprobado"] = Field(description="El artefacto canónico solo existe aprobado (§16.3).")
     metadatos: Metadatos
     documento_fuente: DocumentoFuente
+    documentos_fuente: list[DocumentoFuente] = Field(
+        default_factory=list,
+        description="Fuentes autorizadas del paquete. Contiene al menos la fuente primaria representativa.",
+    )
     contenido_adaptado: ContenidoAdaptado = Field(
         description="Unión discriminada por 'tipo' de los 5 formatos pedagógicos."
     )
@@ -215,11 +228,32 @@ class PaqueteEducativoBase(ModeloContenido):
 
     @model_validator(mode="after")
     def _paquete_aprobado_coherente(self) -> "PaqueteEducativoBase":
+        if not self.documentos_fuente and self.documento_fuente:
+            self.documentos_fuente = [self.documento_fuente]
+        elif self.documentos_fuente and not self.documento_fuente:
+            self.documento_fuente = self.documentos_fuente[0]
+        elif self.documento_fuente and self.documentos_fuente:
+            doc_ids = [d.document_id for d in self.documentos_fuente]
+            if self.documento_fuente.document_id not in doc_ids:
+                if len(self.documentos_fuente) <= 1:
+                    self.documentos_fuente = [self.documento_fuente]
+                else:
+                    self.documentos_fuente.insert(0, self.documento_fuente)
+            else:
+                idx = doc_ids.index(self.documento_fuente.document_id)
+                self.documentos_fuente[idx] = self.documento_fuente
         if self.evaluacion_calidad.estado_evaluacion != "aprobada":
             raise ValueError("El paquete canónico requiere evaluación aprobada")
         if self.metadatos.formato_generado.value != self.contenido_adaptado.tipo:
             raise ValueError("El formato de los metadatos no coincide con el contenido")
         return self
+
+    @model_serializer(mode="wrap")
+    def _serializar(self, handler):
+        datos = handler(self)
+        if isinstance(datos, dict) and len(datos.get("documentos_fuente") or []) <= 1:
+            datos.pop("documentos_fuente", None)
+        return datos
 
 
 class PedagogicalOutput(PaqueteEducativoBase):
@@ -286,6 +320,20 @@ class BasicPedagogicalOutput(PaqueteEducativoBase):
 
     @model_validator(mode="after")
     def _paquete_aprobado_coherente(self):
+        if not self.documentos_fuente and self.documento_fuente:
+            self.documentos_fuente = [self.documento_fuente]
+        elif self.documentos_fuente and not self.documento_fuente:
+            self.documento_fuente = self.documentos_fuente[0]
+        elif self.documento_fuente and self.documentos_fuente:
+            doc_ids = [d.document_id for d in self.documentos_fuente]
+            if self.documento_fuente.document_id not in doc_ids:
+                if len(self.documentos_fuente) <= 1:
+                    self.documentos_fuente = [self.documento_fuente]
+                else:
+                    self.documentos_fuente.insert(0, self.documento_fuente)
+            else:
+                idx = doc_ids.index(self.documento_fuente.document_id)
+                self.documentos_fuente[idx] = self.documento_fuente
         if self.metadatos.formato_generado.value != self.contenido_adaptado.tipo:
             raise ValueError("El formato de los metadatos no coincide con el contenido")
         return self

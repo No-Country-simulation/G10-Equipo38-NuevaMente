@@ -59,9 +59,12 @@ def ejecutar(configuracion, fuentes, *, proveedor_embeddings=None, proveedor_vis
     data_dir = Path(configuracion.data_dir)
     with ExitStack() as recursos:
         recursos.enter_context(exclusividad_runtime(data_dir))
-        # Registro propio de mantenimiento: nunca marca trabajos privados como
-        # huérfanos, fabrica admisiones ni publica sesiones del ámbito reservado.
-        db = RegistroOperativo(data_dir / "demo-mantenimiento.db")
+        db = RegistroOperativo(
+            data_dir / "demo-mantenimiento.db",
+            dias_retencion=configuracion.workspace_retention_days,
+            limite_documentos=configuracion.workspace_max_documents,
+            limite_generaciones=configuracion.workspace_max_generations,
+        )
         recursos.callback(db.cerrar)
         workspace = "mantenimiento_" + secrets.token_hex(12)
         db.crear_workspace(workspace, secrets.token_urlsafe(32), 30)

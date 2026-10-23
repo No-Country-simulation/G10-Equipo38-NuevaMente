@@ -60,11 +60,16 @@ def validar_borrador(texto: str, estado: EstadoGrafo) -> tuple[BorradorPedagogic
         raise BorradorInvalidoError(
             "Los metadatos deben respetar perfil, formato, nicho, detalle e idiomas solicitados."
         )
-    if metadatos.alcance.model_dump(exclude={"secciones_cubiertas"}) != solicitud.alcance.model_dump():
+    alcance_esperado = solicitud.alcance.model_dump(exclude={"document_ids"})
+    alcance_borrador = metadatos.alcance.model_dump(exclude={"secciones_cubiertas", "document_ids"})
+    if alcance_borrador != alcance_esperado:
         raise BorradorInvalidoError("Conservar el alcance solicitado sin sustituir el documento o la sección.")
     if set(metadatos.alcance.secciones_cubiertas or []) != set(estado.secciones_cubiertas):
         raise BorradorInvalidoError("Declarar únicamente la cobertura recuperada por Researcher.")
 
+    es_multidocumento = (
+        len(getattr(estado, "document_ids", None) or ([estado.document_id] if estado.document_id else [])) > 1
+    )
     permitidas = {item.chunk.chunk_id: item.como_referencia() for item in estado.evidencia}
     referencias = {}
     contenido = validado.contenido_adaptado.model_dump(mode="json")
@@ -85,8 +90,25 @@ def validar_borrador(texto: str, estado: EstadoGrafo) -> tuple[BorradorPedagogic
                             raise BorradorInvalidoError(
                                 "Las ubicaciones de las citas deben coincidir con la evidencia."
                             )
-                        item[indice] = original.model_dump(mode="json")
-                        referencias[original.chunk_id] = original
+                        if (
+                            referencia.document_id is not None
+                            and original.document_id is not None
+                            and referencia.document_id != original.document_id
+                        ):
+                            raise BorradorInvalidoError(
+                                "El document_id de la cita debe coincidir con la evidencia original."
+                            )
+                        if not es_multidocumento and referencia.document_id is None:
+                            ref_salida = Referencia(
+                                chunk_id=original.chunk_id,
+                                pagina=original.pagina,
+                                seccion=original.seccion,
+                                document_id=None,
+                            )
+                        else:
+                            ref_salida = original
+                        item[indice] = ref_salida.model_dump(mode="json")
+                        referencias[original.chunk_id] = ref_salida
                 else:
                     recorrer(item)
         elif isinstance(valor, list):
@@ -95,4 +117,6 @@ def validar_borrador(texto: str, estado: EstadoGrafo) -> tuple[BorradorPedagogic
 
     recorrer(contenido)
     metadatos.alcance.secciones_cubiertas = list(estado.secciones_cubiertas)
+    if es_multidocumento and getattr(estado, "document_ids", None):
+        metadatos.alcance.document_ids = list(estado.document_ids)
     return BorradorPedagogico(contenido_adaptado=contenido, metadatos=metadatos), list(referencias.values())

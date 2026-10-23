@@ -436,6 +436,8 @@ class GestorTrabajos:
         document_id: str | None = None,
         al_terminar: Callable[[JobStatus], None] | None = None,
         cache_key: str | None = None,
+        document_ids: list[str] | None = None,
+        scope_hash: str | None = None,
     ) -> str:
         """Registra un trabajo y devuelve su job_id. Rechaza según §7.5.
 
@@ -465,6 +467,8 @@ class GestorTrabajos:
                 generation_id=generation_id,
                 document_id=document_id,
                 cache_key=cache_key,
+                document_ids=document_ids,
+                scope_hash=scope_hash,
             )
             self._ejecutables[identificador] = funcion
             self._cancelaciones[identificador] = threading.Event()
@@ -688,9 +692,8 @@ class GestorTrabajos:
         except ErrorProcesamientoDocumental as error:
             self._finalizar(job_id, JobStatus.FAILED, str(error), error_code=error.codigo)
             return
-        except Exception:  # noqa: BLE001 - el worker nunca debe morir
-            # Error PERMANENTE: sin reintento (reintentar validaciones no
-            # tiene sentido) y sin tragar la causa: queda en el registro.
+        except Exception as exc:  # noqa: BLE001 - el worker nunca debe morir
+            logging.getLogger(__name__).exception("Error interno en worker: %s", exc)
             self._finalizar(job_id, JobStatus.FAILED, "Error interno del trabajo.", error_code="ERROR_TRABAJO")
             self._limpiar(job_id)
             return

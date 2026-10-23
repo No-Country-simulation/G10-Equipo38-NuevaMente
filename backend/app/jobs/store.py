@@ -64,7 +64,7 @@ from app.schemas.errors import ErrorAplicacion, ErrorCode
 # Versión actual del esquema. Cada cambio de esquema agrega una entrada a
 # MIGRACIONES y sube este número; NUNCA se edita una migración ya aplicada
 # (las bases reales de los usuarios quedaron con la vieja).
-VERSION_ESQUEMA = 11
+VERSION_ESQUEMA = 12
 
 # Cada migración: (versión, SQL). Se aplican en orden ascendente dentro de
 # una transacción cada una. La v1 crea todas las tablas del issue #08.
@@ -325,6 +325,56 @@ CREATE TABLE workspace_cleanup (
 )
 
 
+MIGRACIONES.append(
+    (
+        12,
+        """
+CREATE TABLE generation_documents (
+    generation_id TEXT NOT NULL REFERENCES generations(generation_id) ON DELETE CASCADE,
+    document_id   TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+    titulo        TEXT,
+    hash          TEXT,
+    version       TEXT,
+    PRIMARY KEY (generation_id, document_id)
+);
+CREATE INDEX idx_gen_docs_doc ON generation_documents(document_id);
+CREATE INDEX idx_gen_docs_gen ON generation_documents(generation_id);
+
+CREATE TABLE job_documents (
+    job_id       TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+    document_id  TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+    PRIMARY KEY (job_id, document_id)
+);
+CREATE INDEX idx_job_docs_doc ON job_documents(document_id);
+CREATE INDEX idx_job_docs_job ON job_documents(job_id);
+
+ALTER TABLE generations ADD COLUMN snapshot_fuentes_json TEXT;
+ALTER TABLE jobs ADD COLUMN scope_hash TEXT;
+CREATE INDEX idx_jobs_scope_hash ON jobs(workspace_id, scope_hash) WHERE scope_hash IS NOT NULL;
+
+INSERT INTO generation_documents (generation_id, document_id, titulo, hash, version)
+SELECT g.generation_id, g.document_id, d.titulo, d.hash, 'v1'
+FROM generations g
+JOIN documents d ON g.document_id = d.document_id;
+
+INSERT INTO job_documents (job_id, document_id)
+SELECT j.job_id, j.document_id
+FROM jobs j
+JOIN documents d ON j.document_id = d.document_id
+WHERE j.document_id IS NOT NULL;
+
+INSERT OR IGNORE INTO job_documents (job_id, document_id)
+SELECT j.job_id, gd.document_id
+FROM jobs j
+JOIN generation_documents gd ON j.generation_id = gd.generation_id;
+
+UPDATE jobs SET scope_hash = json_extract(resultado, '$.document_hash')
+WHERE tipo = 'chat' AND resultado IS NOT NULL AND json_extract(resultado, '$.document_hash') IS NOT NULL;
+""",
+    )
+)
+
+
 def retirar_referencias(valor, document_id: str, generaciones: set[str]):
     """Retira únicamente registros que declaran una relación conocida."""
     if isinstance(valor, dict):
@@ -415,10 +465,30 @@ class RegistroOperativo:
     sobre la misma base violan el modelo de §14.2 y no está soportado.
     """
 
-    def __init__(self, ruta_db: str | Path, dias_retencion: int = 30) -> None:
+    def __init__(
+        self,
+        ruta_db: str | Path,
+        dias_retencion: int = 30,
+        limite_documentos: int = 5,
+        limite_generaciones: int = 20,
+        *,
+        max_documentos: int | None = None,
+        max_generaciones: int | None = None,
+    ) -> None:
         self.ruta_db = Path(ruta_db)
         self.ruta_db.parent.mkdir(parents=True, exist_ok=True)
         self.dias_retencion = dias_retencion
+        self.limite_documentos = max_documentos if max_documentos is not None else limite_documentos
+        self.limite_generaciones = max_generaciones if max_generaciones is not None else limite_generaciones
+        if (
+            type(self.limite_documentos) is not int
+            or type(self.limite_generaciones) is not int
+            or self.limite_documentos <= 0
+            or self.limite_generaciones <= 0
+        ):
+            raise ValueError("Los límites de recursos del espacio deben ser enteros positivos.")
+        self.max_documentos = self.limite_documentos
+        self.max_generaciones = self.limite_generaciones
         self._lock = threading.RLock()
         # check_same_thread=False: la conexión se usa desde los hilos del
         # threadpool de FastAPI (siempre bajo el lock de arriba).
@@ -1036,7 +1106,7 @@ class RegistroOperativo:
                 ).fetchone()
             ):
                 raise EspacioDocumentalOcupado("El espacio ya tiene un trabajo o una admisión en curso")
-            self.comprobar_limite_recursos(workspace_id, "documents", 5)
+            self.comprobar_limite_recursos(workspace_id, "documents", self.limite_documentos)
             self.registrar_documento(
                 document_id,
                 workspace_id,
@@ -1292,16 +1362,25 @@ class RegistroOperativo:
         generaciones = [
             r[0]
             for r in self._conn.execute(
-                "SELECT generation_id FROM generations WHERE workspace_id=? AND document_id=?",
-                (workspace_id, document_id),
+                """SELECT DISTINCT g.generation_id FROM generations g
+                   LEFT JOIN generation_documents gd ON gd.generation_id = g.generation_id
+                   WHERE g.workspace_id=? AND (g.document_id=? OR gd.document_id=?)""",
+                (workspace_id, document_id, document_id),
             )
         ]
         trabajos = [
             dict(r)
             for r in self._conn.execute(
-                """SELECT j.* FROM jobs j LEFT JOIN generations g ON g.generation_id=j.generation_id
-               WHERE j.workspace_id=? AND (j.document_id=? OR (g.workspace_id=? AND g.document_id=?))""",
-                (workspace_id, document_id, workspace_id, document_id),
+                """SELECT DISTINCT j.* FROM jobs j
+                   LEFT JOIN job_documents jd ON jd.job_id = j.job_id
+                   LEFT JOIN generations g ON g.generation_id = j.generation_id
+                   LEFT JOIN generation_documents gd ON gd.generation_id = g.generation_id
+                   WHERE j.workspace_id=? AND (
+                       j.document_id=?
+                       OR jd.document_id=?
+                       OR (g.workspace_id=? AND (g.document_id=? OR gd.document_id=?))
+                   )""",
+                (workspace_id, document_id, document_id, workspace_id, document_id, document_id),
             )
         ]
         return generaciones, trabajos
@@ -1365,39 +1444,74 @@ class RegistroOperativo:
     # ------------------------------------------------------------------
 
     def registrar_generacion(
-        self, generation_id: str, workspace_id: str, document_id: str, status: JobStatus = JobStatus.QUEUED
+        self,
+        generation_id: str,
+        workspace_id: str,
+        document_id: str,
+        status: JobStatus = JobStatus.QUEUED,
+        document_ids: list[str] | None = None,
+        snapshot: list[object] | None = None,
     ) -> None:
         ahora = _iso(_ahora())
         with self._lock:
-            documento = self.obtener_documento(document_id)
-            if documento is None or documento["workspace_id"] != workspace_id:
-                raise ValueError("El documento no pertenece al espacio o fue retirado")
+            doc_ids = sorted(list(set(document_ids))) if document_ids else [document_id]
+            if document_id not in doc_ids:
+                doc_ids.insert(0, document_id)
+            docs_map = {}
+            for d_id in doc_ids:
+                doc = self.obtener_documento(d_id)
+                if doc is None or doc["workspace_id"] != workspace_id:
+                    raise ValueError("El documento no pertenece al espacio o fue retirado")
+                docs_map[d_id] = doc
+            snapshot_json = None
+            if snapshot:
+                snapshot_json = json.dumps(
+                    [s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in snapshot],
+                    ensure_ascii=False,
+                )
             self._conn.execute(
                 """
-                INSERT INTO generations (generation_id, workspace_id, document_id, status, creado_en, actualizado_en)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO generations (generation_id, workspace_id, document_id, status, creado_en, actualizado_en, snapshot_fuentes_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (generation_id, workspace_id, document_id, status.value, ahora, ahora),
+                (generation_id, workspace_id, document_id, status.value, ahora, ahora, snapshot_json),
             )
+            for d_id in doc_ids:
+                d_info = docs_map[d_id]
+                self._conn.execute(
+                    """
+                    INSERT OR REPLACE INTO generation_documents (generation_id, document_id, titulo, hash, version)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (generation_id, d_id, d_info.get("titulo"), d_info.get("hash"), "v1"),
+                )
 
     @_sincronizado
-    def registrar_generacion_retirada(self, generation_id: str, workspace_id: str, document_id: str) -> None:
+    def registrar_generacion_retirada(
+        self, generation_id: str, workspace_id: str, document_id: str, document_ids: list[str] | None = None
+    ) -> None:
         """Relación interna de purga; exige la lápida y nunca autoriza el resultado."""
-        documento = self._conn.execute(
-            "SELECT workspace_id FROM documents WHERE document_id=?", (document_id,)
-        ).fetchone()
-        if (
-            documento is None
-            or documento["workspace_id"] != workspace_id
-            or not self.esta_borrado("document", document_id)
-        ):
-            raise ValueError("La relación de purga requiere un documento retirado del mismo espacio")
+        doc_ids = document_ids or [document_id]
+        for d_id in doc_ids:
+            documento = self._conn.execute("SELECT workspace_id FROM documents WHERE document_id=?", (d_id,)).fetchone()
+            if (
+                documento is None
+                or documento["workspace_id"] != workspace_id
+                or not self.esta_borrado("document", d_id)
+            ):
+                raise ValueError("La relación de purga requiere un documento retirado del mismo espacio")
         ahora = _iso(_ahora())
         self._conn.execute(
             """INSERT INTO generations (generation_id, workspace_id, document_id, status, creado_en, actualizado_en)
             VALUES (?, ?, ?, ?, ?, ?)""",
             (generation_id, workspace_id, document_id, JobStatus.COMPLETED.value, ahora, ahora),
         )
+        for d_id in doc_ids:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO generation_documents (generation_id, document_id, titulo, hash, version)
+                VALUES (?, ?, ?, ?, ?)""",
+                (generation_id, d_id, "Documento retirado", None, "v1"),
+            )
 
     def actualizar_generacion(
         self, generation_id: str, status: JobStatus, error_code: str | None = None, error_message: str | None = None
@@ -1414,8 +1528,49 @@ class RegistroOperativo:
             )
 
     @_sincronizado
+    def documentos_generacion(self, generation_id: str) -> list[str]:
+        """IDs de todos los documentos vinculados a la generación."""
+        filas = self._conn.execute(
+            "SELECT document_id FROM generation_documents WHERE generation_id=? ORDER BY rowid",
+            (generation_id,),
+        ).fetchall()
+        if filas:
+            return [r[0] for r in filas]
+        gen = self._conn.execute(
+            "SELECT document_id FROM generations WHERE generation_id=?", (generation_id,)
+        ).fetchone()
+        return [gen[0]] if gen and gen[0] else []
+
+    @_sincronizado
+    def snapshot_generacion(self, generation_id: str) -> list[dict] | None:
+        fila = self._conn.execute(
+            "SELECT snapshot_fuentes_json FROM generations WHERE generation_id=?",
+            (generation_id,),
+        ).fetchone()
+        if fila and fila[0]:
+            return json.loads(fila[0])
+        return None
+
+    @_sincronizado
+    def documentos_ready(self, workspace_id: str) -> list[dict]:
+        filas = self._conn.execute(
+            """SELECT d.* FROM documents d
+               JOIN workspaces w ON w.workspace_id = d.workspace_id
+               WHERE d.workspace_id = ? AND d.estado = 'ready'
+                 AND w.borrado_en IS NULL AND w.expira_en > ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM pending_deletes r
+                     WHERE (r.recurso_tipo = 'document' AND r.recurso_id = d.document_id)
+                        OR (r.recurso_tipo = 'workspace' AND r.recurso_id = d.workspace_id)
+                 )
+               ORDER BY d.creado_en ASC, d.document_id ASC""",
+            (workspace_id, _iso(_ahora())),
+        ).fetchall()
+        return [dict(f) for f in filas]
+
+    @_sincronizado
     def obtener_generacion(self, generation_id: str) -> dict | None:
-        """Trabajo solo si existe y nadie lo retiró (lápida propia o del espacio)."""
+        """Trabajo solo si existe y nadie lo retiró (lápida propia o de cualquiera de sus fuentes)."""
         if self.esta_borrado("generation", generation_id):
             return None
         fila = self._conn.execute(
@@ -1426,20 +1581,18 @@ class RegistroOperativo:
             """,
             (generation_id, _iso(_ahora())),
         ).fetchone()
-        if fila and self.esta_borrado("document", fila["document_id"]):
+        if not fila:
             return None
-        return dict(fila) if fila else None
+        if self.esta_borrado("document", fila["document_id"]):
+            return None
+        docs_gen = self.documentos_generacion(generation_id)
+        if any(self.esta_borrado("document", d_id) for d_id in docs_gen):
+            return None
+        return dict(fila)
 
     @_sincronizado
     def listar_generaciones(self, workspace_id: str) -> list[dict]:
-        """Listado del espacio (GET /api/generations) sin recursos borrados.
-
-        Excluye, además del espacio retirado:
-        - generaciones con lápida PROPIA, y
-        - generaciones cuyo DOCUMENTO tiene lápida: borrar un documento
-          retira también sus derivados (§8.5: "borrar un documento retira
-          original, índice, derivados, chat y progreso vinculados").
-        """
+        """Listado del espacio (GET /api/generations) sin recursos borrados ni fuentes retiradas."""
         ahora = _iso(_ahora())
         filas = self._conn.execute(
             """
@@ -1453,7 +1606,12 @@ class RegistroOperativo:
               )
               AND NOT EXISTS (
                   SELECT 1 FROM pending_deletes pd2
-                   WHERE pd2.recurso_tipo = 'document' AND pd2.recurso_id = g.document_id
+                   WHERE pd2.recurso_tipo = 'document'
+                     AND (pd2.recurso_id = g.document_id
+                          OR pd2.recurso_id IN (
+                              SELECT gd.document_id FROM generation_documents gd
+                              WHERE gd.generation_id = g.generation_id
+                          ))
               )
             ORDER BY g.creado_en DESC
             """,
@@ -1483,15 +1641,26 @@ class RegistroOperativo:
         return dict(fila) if fila else None
 
     @_sincronizado
-    def historial_chat(self, workspace_id: str, document_id: str, document_hash: str, limite: int):
+    def historial_chat(
+        self,
+        workspace_id: str,
+        document_id: str,
+        document_hash: str,
+        limite: int,
+        scope_hash: str | None = None,
+    ):
         if not 0 <= limite <= 50:
             raise ValueError("Límite de turnos inválido")
+        target_scope = scope_hash or document_hash
         filas = self._conn.execute(
-            """SELECT resultado FROM jobs WHERE workspace_id=? AND document_id=?
+            """SELECT resultado FROM jobs WHERE workspace_id=?
                AND tipo='chat' AND status='completed' AND resultado IS NOT NULL
-               AND json_extract(resultado, '$.document_hash')=?
+               AND (
+                   scope_hash=?
+                   OR (scope_hash IS NULL AND document_id=? AND json_extract(resultado, '$.document_hash')=?)
+               )
                ORDER BY creado_en DESC, job_id DESC LIMIT ?""",
-            (workspace_id, document_id, document_hash, limite),
+            (workspace_id, target_scope, document_id, document_hash, limite),
         ).fetchall()
         return [json.loads(fila[0]) for fila in reversed(filas)]
 
@@ -1504,15 +1673,24 @@ class RegistroOperativo:
         if vencimiento.tzinfo is None or not _ahora() < vencimiento <= _ahora() + timedelta(hours=24):
             raise ValueError("La retención debe vencer dentro de 24 horas")
         fila = self.obtener_generacion(generation_id)
+        docs_gen = self.documentos_generacion(generation_id)
         if (
             fila is None
             or len(paquete_json.encode()) > 2_000_000
-            or (paquete.generation_id, paquete.documento_fuente.document_id) != (generation_id, fila["document_id"])
+            or paquete.generation_id != generation_id
+            or (
+                paquete.documento_fuente.document_id != fila["document_id"]
+                and paquete.documento_fuente.document_id not in docs_gen
+            )
             or paquete.almacenamiento_oci.objeto_id != f"outputs/{fila['workspace_id']}/{generation_id}/content.json"
             or modo_paquete(paquete)
             != json.loads(fila["parametros_json"] or "{}").get("modo_generacion", "multiagente")
         ):
             raise ValueError("El aprobado no corresponde a su generación")
+        if getattr(paquete, "documentos_fuente", None):
+            fuentes_ids = {f.document_id for f in paquete.documentos_fuente}
+            if docs_gen and not fuentes_ids.issubset(set(docs_gen)):
+                raise ValueError("El aprobado contiene fuentes no asociadas a la generación")
         self._conn.execute(
             "INSERT OR IGNORE INTO approved_outputs VALUES (?, ?, ?)", (generation_id, paquete_json, expira_en)
         )
@@ -1567,14 +1745,21 @@ class RegistroOperativo:
             "w.borrado_en IS NULL",
             "w.expira_en>?",
             "NOT EXISTS (SELECT 1 FROM pending_deletes p WHERE p.recurso_tipo='generation' AND p.recurso_id=g.generation_id)",
-            "NOT EXISTS (SELECT 1 FROM pending_deletes p WHERE p.recurso_tipo='document' AND p.recurso_id=g.document_id)",
+            """NOT EXISTS (
+                SELECT 1 FROM pending_deletes p
+                WHERE p.recurso_tipo='document'
+                  AND (p.recurso_id=g.document_id
+                       OR p.recurso_id IN (
+                           SELECT gd.document_id FROM generation_documents gd
+                           WHERE gd.generation_id=g.generation_id
+                       ))
+            )""",
         ]
         valores = [workspace_id, _iso(_ahora())]
         if despues is not None:
             condiciones.append("(g.creado_en, g.generation_id)<(?, ?)")
             valores.extend(despues)
         columnas = {
-            "documento": "g.document_id",
             "perfil": "json_extract(g.parametros_json, '$.perfil_destinatario')",
             "formato": "json_extract(g.parametros_json, '$.formato_salida')",
             "idioma": "json_extract(g.parametros_json, '$.idioma_salida')",
@@ -1582,13 +1767,19 @@ class RegistroOperativo:
         for nombre, valor in filtros.items():
             if valor is None:
                 continue
-            if nombre in columnas:
+            if nombre == "documento":
+                condiciones.append(
+                    "(g.document_id=? OR EXISTS (SELECT 1 FROM generation_documents gd WHERE gd.generation_id=g.generation_id AND gd.document_id=?))"
+                )
+                valores.extend([valor, valor])
+            elif nombre in columnas:
                 condiciones.append(columnas[nombre] + "=?")
+                valores.append(valor)
             elif nombre in ("desde", "hasta"):
                 condiciones.append("g.creado_en" + (">=?" if nombre == "desde" else "<=?"))
+                valores.append(valor)
             else:
                 raise ValueError("Filtro no permitido")
-            valores.append(valor)
         filas = self._conn.execute(
             "SELECT g.* FROM generations g JOIN workspaces w ON w.workspace_id=g.workspace_id WHERE "
             + " AND ".join(condiciones)
@@ -1618,21 +1809,37 @@ class RegistroOperativo:
         generation_id: str | None = None,
         document_id: str | None = None,
         cache_key: str | None = None,
+        document_ids: list[str] | None = None,
+        scope_hash: str | None = None,
     ) -> None:
         """Acepta trabajo y evento juntos; la generación vinculada comparte su ciclo de vida."""
         self._conn.execute("BEGIN IMMEDIATE")
         try:
             if self.obtener_workspace(workspace_id) is None:
                 raise ValueError("El espacio no está disponible")
+            docs_gen: list[str] = []
             if generation_id:
                 generacion = self.obtener_generacion(generation_id)
                 if not generacion or generacion["workspace_id"] != workspace_id or generacion["status"] != "queued":
                     raise ValueError("La generación no está disponible para encolar")
+                docs_gen = self.documentos_generacion(generation_id)
+
+            todos_doc_ids: list[str] = []
+            if document_id:
+                todos_doc_ids.append(document_id)
+            if document_ids:
+                for d in document_ids:
+                    if d not in todos_doc_ids:
+                        todos_doc_ids.append(d)
+            for d in docs_gen:
+                if d not in todos_doc_ids:
+                    todos_doc_ids.append(d)
+
             if document_id is not None:
                 documento = self.obtener_documento(document_id)
                 if not documento or documento["workspace_id"] != workspace_id:
                     raise ValueError("El documento no está disponible para el trabajo")
-                if generation_id and generacion["document_id"] != document_id:
+                if generation_id and generacion["document_id"] != document_id and document_id not in docs_gen:
                     raise ValueError("La generación corresponde a otro documento")
                 if tipo == "ingestion" and (generation_id or documento["estado"] != DocumentStatus.PROCESSING.value):
                     raise ValueError("El documento no está en procesamiento")
@@ -1649,11 +1856,32 @@ class RegistroOperativo:
                            recuperacion_intentos=recuperacion_intentos+1 WHERE document_id=?""",
                         (document_id,),
                     )
+
+            for d_id in todos_doc_ids:
+                if d_id == document_id:
+                    continue
+                d_obj = self.obtener_documento(d_id)
+                if not d_obj or d_obj["workspace_id"] != workspace_id:
+                    raise ValueError("El documento no está disponible para el trabajo")
+                if tipo != "ingestion" and d_obj["estado"] != DocumentStatus.READY.value:
+                    raise ValueError("El documento no está listo para el trabajo")
+
             self.registrar_job(job_id, workspace_id, tipo)
             self._conn.execute(
-                "UPDATE jobs SET generation_id=?, document_id=?, cache_key=? WHERE job_id=?",
-                (generation_id, document_id, cache_key, job_id),
+                "UPDATE jobs SET generation_id=?, document_id=?, cache_key=?, scope_hash=? WHERE job_id=?",
+                (generation_id, document_id, cache_key, scope_hash, job_id),
             )
+            for d_id in todos_doc_ids:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO job_documents (job_id, document_id) VALUES (?, ?)",
+                    (job_id, d_id),
+                )
+            if generation_id:
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO job_documents (job_id, document_id)
+                       SELECT ?, document_id FROM generation_documents WHERE generation_id=?""",
+                    (job_id, generation_id),
+                )
             self.registrar_evento(
                 workspace_id, "encolado", JobStatus.QUEUED, job_id=job_id, generation_id=generation_id
             )
@@ -2058,9 +2286,16 @@ class RegistroOperativo:
     # ------------------------------------------------------------------
 
     @_sincronizado
-    def comprobar_limite_recursos(self, workspace_id, tabla, limite):
+    def comprobar_limite_recursos(self, workspace_id: str, tabla: str, limite: int | None = None) -> None:
         if tabla not in ("documents", "generations"):
             raise ValueError("Recurso inválido")
+        if limite is not None and (type(limite) is not int or limite <= 0):
+            raise ValueError("El límite debe ser un entero positivo.")
+        limite_efectivo = (
+            limite
+            if limite is not None
+            else (self.limite_documentos if tabla == "documents" else self.limite_generaciones)
+        )
         tipo, identificador = ("document", "document_id") if tabla == "documents" else ("generation", "generation_id")
         usados = self._conn.execute(
             f"""SELECT COUNT(*) FROM {tabla} r WHERE workspace_id=?
@@ -2068,11 +2303,11 @@ class RegistroOperativo:
             AND NOT EXISTS(SELECT 1 FROM pending_deletes p WHERE p.recurso_tipo='document' AND p.recurso_id=r.document_id)""",
             (workspace_id, tipo),
         ).fetchone()[0]
-        if usados >= limite:
+        if usados >= limite_efectivo:
             raise ErrorAplicacion(
                 ErrorCode.RATE_LIMITED,
                 "Alcanzaste el límite de recursos conservados. Borrá uno para continuar.",
-                {"motivo": "workspace_resource_limit", "recurso": tabla, "limite": limite, "usados": usados},
+                {"motivo": "workspace_resource_limit", "recurso": tabla, "limite": limite_efectivo, "usados": usados},
             )
 
     @_sincronizado
@@ -2124,7 +2359,7 @@ class RegistroOperativo:
         return documentos, trabajos, escrituras
 
     @_sincronizado
-    def uso_espacio(self, ws):
+    def uso_espacio(self, ws: str) -> dict[str, int]:
         documentos = sum(
             self.obtener_documento(r[0]) is not None
             for r in self._conn.execute("SELECT document_id FROM documents WHERE workspace_id=?", (ws,)).fetchall()
@@ -2135,9 +2370,9 @@ class RegistroOperativo:
         )
         return {
             "documentos": documentos,
-            "limite_documentos": 5,
+            "limite_documentos": self.limite_documentos,
             "generaciones": generaciones,
-            "limite_generaciones": 20,
+            "limite_generaciones": self.limite_generaciones,
         }
 
     def purgar_datos_espacio(self, ws):

@@ -18,6 +18,17 @@ export function mensajeError(error: APIError, idioma: OutputLanguage): string {
     clave = `upload.parser_${parserCode.toLowerCase()}`;
   }
   if (motivo === 'workspace_resource_limit') {
+    const limite = error.details?.limite;
+    const recurso = error.details?.recurso;
+    if (limite !== undefined && limite !== null) {
+      if (recurso === 'documents') {
+        return t('presupuesto.limite_documentos', idioma, { limite });
+      }
+      if (recurso === 'generations') {
+        return t('presupuesto.limite_generaciones', idioma, { limite });
+      }
+      return t('presupuesto.limite_recursos_con_limite', idioma, { limite });
+    }
     clave = 'presupuesto.limite_recursos';
   } else if (motivo === 'storage_budget') {
     clave = 'presupuesto.bloqueado';

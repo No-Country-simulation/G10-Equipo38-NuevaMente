@@ -50,16 +50,17 @@ const SourcesDrawerView: React.FC<{
 
     setLoading((prev) => ({ ...prev, [cid]: true }));
     setErrors((prev) => ({ ...prev, [cid]: null }));
+    const targetDocId = ref.document_id || documentId;
     try {
-      const fuente = await apiClient.getDocumentSource(token, documentId, cid, { demo });
+      const fuente = await apiClient.getDocumentSource(token, targetDocId, cid, { demo });
       if (!active.current) return;
-      validarFuente(fuente, ref, documentId);
+      validarFuente(fuente, ref, targetDocId);
       setLoadedSources((prev) => ({ ...prev, [cid]: fuente }));
 
       const esInterpretacion =
         fuente.source_type === 'image_description' || Boolean(fuente.interpretacion_modelo);
       if (esInterpretacion && !demo) {
-        const pngBytes = await apiClient.getDocumentSourceImage(token, documentId, cid);
+        const pngBytes = await apiClient.getDocumentSourceImage(token, targetDocId, cid);
         if (!active.current) return;
         const blob = new Blob([pngBytes], { type: 'image/png' });
         const objUrl = URL.createObjectURL(blob);

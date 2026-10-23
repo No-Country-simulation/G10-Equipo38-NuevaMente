@@ -134,23 +134,35 @@ def restaurar_registro(db: RegistroOperativo, storage: StorageProvider) -> int:
                     raise ValueError("Paquete con identidad ajena o no canónica")
                 if paquete.almacenamiento_oci.objeto_id != salida.object_name:
                     raise ValueError("Paquete con almacenamiento ajeno")
-                doc = por_id.get(paquete.documento_fuente.document_id)
-                if doc is None:
-                    document_id = paquete.documento_fuente.document_id
-                    if ("document", document_id) in lapidas:
-                        retirado = manifiestos_retirados.get(document_id)
-                        if retirado is not None and (
-                            paquete.documento_fuente.hash.removeprefix("sha256:") != retirado[1].hash_sha256
-                        ):
-                            raise ValueError("Paquete de otra versión del documento retirado")
-                        # Solo relación de control para purgar sus derivados;
-                        # la lápida del documento impide servir este resultado.
-                        generaciones_retiradas.append(paquete)
+                fuentes = paquete.documentos_fuente or [paquete.documento_fuente]
+                alguna_lapida = any(("document", f.document_id) in lapidas for f in fuentes)
+                if alguna_lapida:
+                    for f in fuentes:
+                        if ("document", f.document_id) in lapidas:
+                            retirado = manifiestos_retirados.get(f.document_id)
+                            if retirado is not None and (f.hash.removeprefix("sha256:") != retirado[1].hash_sha256):
+                                raise ValueError("Paquete de otra versión del documento retirado")
+                    # Relación de control para purgar sus derivados; la lápida del
+                    # documento impide servir el resultado. Se registra INCLUSO cuando
+                    # la generación tiene lápida propia: sin esta relación la purga de
+                    # la recuperación desconoce sus derivados y jamás los elimina.
+                    generaciones_retiradas.append(paquete)
                     continue
+
                 if ("generation", generation_id) in lapidas:
                     continue
-                if paquete.documento_fuente.hash.removeprefix("sha256:") != doc.hash_sha256:
-                    raise ValueError("Paquete de otra versión del documento")
+
+                todas_presentes = True
+                for f in fuentes:
+                    doc = por_id.get(f.document_id)
+                    if doc is None:
+                        todas_presentes = False
+                        break
+                    if f.hash.removeprefix("sha256:") != doc.hash_sha256:
+                        raise ValueError("Paquete de otra versión del documento")
+                if not todas_presentes:
+                    continue
+
                 generaciones.append(paquete)
             try:
                 progreso = json.loads(storage.get(clave_progress(workspace_id)))
@@ -231,14 +243,22 @@ def restaurar_registro(db: RegistroOperativo, storage: StorageProvider) -> int:
                 if doc.document_id in evidencias:
                     db.acreditar_documento_restaurado(doc.document_id, evidencias[doc.document_id])
             for paquete in generaciones:
+                fuentes = paquete.documentos_fuente or [paquete.documento_fuente]
+                doc_ids = [f.document_id for f in fuentes]
                 db.registrar_generacion(
-                    paquete.generation_id, workspace_id, paquete.documento_fuente.document_id, JobStatus.COMPLETED
+                    paquete.generation_id,
+                    workspace_id,
+                    paquete.documento_fuente.document_id,
+                    JobStatus.COMPLETED,
+                    document_ids=doc_ids,
+                    snapshot=fuentes,
                 )
                 datos = paquete.metadatos.model_dump(mode="json")
                 db.guardar_parametros_generacion(
                     paquete.generation_id,
                     {
                         "document_id": paquete.documento_fuente.document_id,
+                        **({"document_ids": doc_ids} if len(doc_ids) > 1 else {}),
                         **({"modo_generacion": modo_paquete(paquete)} if paquete.schema_version == "1.1" else {}),
                         "perfil_destinatario": datos["perfil_aplicado"],
                         "formato_salida": datos["formato_generado"],
@@ -250,8 +270,13 @@ def restaurar_registro(db: RegistroOperativo, storage: StorageProvider) -> int:
                     creado_en=paquete.created_at.isoformat(),
                 )
             for paquete in generaciones_retiradas:
+                fuentes = paquete.documentos_fuente or [paquete.documento_fuente]
+                doc_ids = [f.document_id for f in fuentes]
                 db.registrar_generacion_retirada(
-                    paquete.generation_id, workspace_id, paquete.documento_fuente.document_id
+                    paquete.generation_id,
+                    workspace_id,
+                    paquete.documento_fuente.document_id,
+                    document_ids=doc_ids,
                 )
             if progreso is not None:
                 # Preservar el agregado; #42 implementará su consumo por la UI.

@@ -44,12 +44,18 @@ def finalizer(estado: EstadoGrafo, *, bucket: str, created_at: datetime) -> Peda
         raise ValueError("El contenido o sus citas cambiaron después de la revisión")
     # construyo el paquete final aprobado con sus copias profundas (deep copy) y la clave de almacenamiento en oci object storage
     modelo = ReviewedPedagogicalOutputV11 if estado.schema_version == "1.1" else PedagogicalOutput
+    fuentes = (
+        [f.model_copy(deep=True) for f in estado.documentos_fuente]
+        if estado.documentos_fuente
+        else [estado.documento_fuente.model_copy(deep=True)]
+    )
     return modelo(
         schema_version=estado.schema_version,
         generation_id=estado.generation_id,
         status="aprobado",
         metadatos=borrador.metadatos.model_copy(deep=True),
         documento_fuente=estado.documento_fuente.model_copy(deep=True),
+        documentos_fuente=fuentes,
         contenido_adaptado=borrador.contenido_adaptado.model_copy(deep=True),
         evaluacion_calidad=calidad.model_copy(deep=True),
         referencias=referencias,

@@ -66,11 +66,14 @@ class ServicioGeneraciones:
 
     def _propia(self, token, generation_id):
         fila = self._propia_db(token, generation_id)
-        self.consulta.detalle(token, fila["document_id"])
+        doc_ids = self.db.documentos_generacion(generation_id) or [fila["document_id"]]
+        for d_id in doc_ids:
+            self.consulta.detalle(token, d_id)
         try:
             manifest = _workspace_vigente(self.storage, self._lectura(token), fila["document_id"])
             if any(
-                r.get("recurso_tipo") == "generation" and r.get("recurso_id") == generation_id
+                (r.get("recurso_tipo") == "generation" and r.get("recurso_id") == generation_id)
+                or (r.get("recurso_tipo") == "document" and r.get("recurso_id") in doc_ids)
                 for r in manifest.get("recursos_borrados", [])
             ):
                 raise TrabajoCanceladoError()
@@ -172,17 +175,29 @@ class ServicioGeneraciones:
         fila = self.db.obtener_generacion(generation_id)
         if fila is None or (fila["workspace_id"], fila["document_id"]) != (contexto.workspace_id, document_id):
             raise TrabajoCanceladoError()
-        ws = _workspace_vigente(self.storage, contexto, document_id)
-        if any(
-            r.get("recurso_tipo") == "generation" and r.get("recurso_id") == generation_id
-            for r in ws.get("recursos_borrados", [])
-        ):
-            raise TrabajoCanceladoError()
+        doc_ids = self.db.documentos_generacion(generation_id) or [document_id]
+        for d_id in doc_ids:
+            ws = _workspace_vigente(self.storage, contexto, d_id)
+            if any(
+                (r.get("recurso_tipo") == "generation" and r.get("recurso_id") == generation_id)
+                or (r.get("recurso_tipo") == "document" and r.get("recurso_id") == d_id)
+                for r in ws.get("recursos_borrados", [])
+            ):
+                raise TrabajoCanceladoError()
+            doc_obj = self.consulta.documento_grafo(contexto, d_id)
+            if doc_obj is None:
+                raise TrabajoCanceladoError()
         documento = self.consulta.documento_grafo(contexto, document_id)
         if documento is None:
             raise TrabajoCanceladoError()
-        if paquete is not None and documento.fuente != paquete.documento_fuente:
-            raise ErrorAplicacion(ErrorCode.INVALID_STATE, "La fuente del material cambió.")
+        if paquete is not None:
+            if documento.fuente != paquete.documento_fuente:
+                raise ErrorAplicacion(ErrorCode.INVALID_STATE, "La fuente del material cambió.")
+            if paquete.documentos_fuente:
+                for doc_f in paquete.documentos_fuente:
+                    doc_g = self.consulta.documento_grafo(contexto, doc_f.document_id)
+                    if doc_g is None or doc_g.fuente != doc_f:
+                        raise ErrorAplicacion(ErrorCode.INVALID_STATE, "Una fuente secundaria del material cambió.")
         return documento
 
     # con esta funcion guardo el artefacto educativo definitivo en el almacenamiento de oracle cloud infrastructure (oci)
@@ -228,6 +243,7 @@ class ServicioGeneraciones:
                         workspace_id=contexto.workspace_id,
                         generation_id=generation_id,
                         document_id=solicitud.document_id,
+                        document_ids=list(solicitud.document_ids),
                         parametros=solicitud,
                         deadline=contexto.deadline,
                     ),
@@ -253,6 +269,7 @@ class ServicioGeneraciones:
                     workspace_id=contexto.workspace_id,
                     generation_id=generation_id,
                     document_id=solicitud.document_id,
+                    document_ids=list(solicitud.document_ids),
                     parametros=solicitud,
                     deadline=contexto.deadline,
                 ),
@@ -275,11 +292,34 @@ class ServicioGeneraciones:
     # registro la intencion en la base de datos y encolo la tarea para su procesamiento en segundo plano
     def generar(self, token, solicitud: GenerateRequest, clave=None):
         clave = self._clave(clave)
-        self.consulta._listo(token, solicitud.document_id)
+        ws = self._sesion(token)["workspace_id"]
+        if solicitud.alcance.tipo == "espacio_completo":
+            ready_docs = self.db.documentos_ready(ws)
+            if not ready_docs:
+                raise ErrorAplicacion(ErrorCode.NOT_FOUND, "No hay documentos listos en el espacio.")
+            if len(ready_docs) > 5:
+                raise ErrorAplicacion(
+                    ErrorCode.VALIDATION_ERROR,
+                    "El alcance espacio_completo supera el límite máximo de 5 documentos.",
+                    details={"cantidad": len(ready_docs), "maximo": 5},
+                )
+            doc_ids = sorted([d["document_id"] for d in ready_docs])
+            datos_sol = solicitud.model_dump()
+            datos_sol["document_ids"] = doc_ids
+            datos_sol["document_id"] = doc_ids[0]
+            solicitud = GenerateRequest.model_validate(datos_sol)
+        if len(solicitud.document_ids) > 5:
+            raise ErrorAplicacion(
+                ErrorCode.VALIDATION_ERROR,
+                "La solicitud supera el límite máximo de 5 documentos fuente.",
+                details={"cantidad": len(solicitud.document_ids), "maximo": 5},
+            )
+        for doc_id in solicitud.document_ids:
+            self.consulta._listo(token, doc_id)
         cuerpo = json.dumps(solicitud.parametros_persistidos(), sort_keys=True, ensure_ascii=False)
         if clave is not None:
             with self.gestor.admision_serializada():
-                previo = self.db.idempotencia_consultar(self._sesion(token)["workspace_id"], "generate", clave, cuerpo)
+                previo = self.db.idempotencia_consultar(ws, "generate", clave, cuerpo)
             if previo is not None:
                 if previo[0] == "conflicto":
                     raise ErrorAplicacion(ErrorCode.IDEMPOTENCY_CONFLICT, "La clave ya corresponde a otro cuerpo.")
@@ -299,6 +339,12 @@ class ServicioGeneraciones:
         if solicitud.alcance.tipo == "seccion" and solicitud.alcance.seccion_id not in documento.secciones:
             raise ErrorAplicacion(ErrorCode.VALIDATION_ERROR, "La sección no pertenece al documento.")
         generation_id = "gen_" + uuid.uuid4().hex
+        snapshot = []
+        for d_id in solicitud.document_ids:
+            d_grafo = self.consulta.documento_grafo(ctx, d_id)
+            if d_grafo is None or d_grafo.fuente is None:
+                raise ErrorAplicacion(ErrorCode.NOT_FOUND, f"Documento {d_id} no encontrado.")
+            snapshot.append(d_grafo.fuente.model_dump(mode="json"))
         with self.gestor.admision_serializada():
             try:
                 with self.db.transaccion():
@@ -312,8 +358,15 @@ class ServicioGeneraciones:
                             )
                         if resultado == "duplicada":
                             return self._propia_db(token, anterior)
-                    self.db.comprobar_limite_recursos(ctx.workspace_id, "generations", 20)
-                    self.db.registrar_generacion(generation_id, ctx.workspace_id, solicitud.document_id)
+                    max_gen = getattr(self.cfg, "workspace_max_generations", None)
+                    self.db.comprobar_limite_recursos(ctx.workspace_id, "generations", max_gen)
+                    self.db.registrar_generacion(
+                        generation_id,
+                        ctx.workspace_id,
+                        solicitud.document_id,
+                        document_ids=list(solicitud.document_ids),
+                        snapshot=snapshot,
+                    )
                     self.db.guardar_parametros_generacion(generation_id, solicitud.parametros_persistidos())
                 fila = self.db.obtener_generacion(generation_id)
                 self.gestor.enqueue(
@@ -322,6 +375,7 @@ class ServicioGeneraciones:
                     self._trabajo(solicitud, generation_id, fila["creado_en"]),
                     generation_id=generation_id,
                     document_id=solicitud.document_id,
+                    document_ids=list(solicitud.document_ids),
                     al_terminar=lambda status: self._terminal(generation_id, status),
                 )
                 if clave is not None:
@@ -375,6 +429,7 @@ class ServicioGeneraciones:
                     ejecutar,
                     generation_id=generation_id,
                     document_id=fila["document_id"],
+                    document_ids=self.db.documentos_generacion(generation_id) or [fila["document_id"]],
                     al_terminar=lambda status: self._terminal(generation_id, status),
                 )
                 if clave is not None:

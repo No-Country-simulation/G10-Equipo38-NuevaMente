@@ -228,3 +228,106 @@ class RetrieverMMR:
             chunks_omitidos=omitidos,
             avisos=["Se omitieron chunks completos por el presupuesto de evidencia."] if omitidos else [],
         )
+
+    def recuperar_multidocumental(
+        self,
+        workspace_id: str,
+        document_ids: list[str],
+        consulta: str,
+        *,
+        contexto: ContextoEjecucion,
+        presupuesto_tokens: int | None = None,
+        source_hashes: dict[str, str] | None = None,
+    ) -> ResultadoRecuperacion:
+        """Recuperación con diversificación MMR y representación equitativa entre fuentes.
+
+        Distribuye el presupuesto global de 12k tokens evitando sobrerrepresentación de
+        una sola fuente y deduplica fragmentos preservando la procedencia documental.
+        """
+        contexto.chequear()
+        if not document_ids:
+            return ResultadoRecuperacion()
+        if not isinstance(consulta, str) or not consulta.strip() or len(consulta) > 2000:
+            raise ValueError("La consulta debe contener entre 1 y 2000 caracteres")
+        presupuesto = self.max_tokens if presupuesto_tokens is None else presupuesto_tokens
+        if type(presupuesto) is not int or not 0 <= presupuesto <= self.max_tokens:
+            raise ValueError("El presupuesto debe estar entre cero y RETRIEVAL_MAX_TOKENS")
+        if presupuesto == 0:
+            return ResultadoRecuperacion(avisos=["Presupuesto de evidencia agotado; no se ejecutó una consulta."])
+
+        limite_fetch = min(100, max(self.configuracion.retrieval_fetch_k, 15 * len(document_ids)))
+        candidatos = self.indice.buscar_multidocumental(
+            workspace_id,
+            document_ids,
+            consulta.strip(),
+            contexto=contexto,
+            limite=limite_fetch,
+        )
+        contexto.chequear()
+
+        ids, textos_por_doc, pendientes = {}, {}, []
+        dimensiones = None
+        for hit in sorted(candidatos, key=lambda h: (-h.similitud, h.chunk.indice, h.chunk.chunk_id)):
+            chunk = hit.chunk
+            if chunk.workspace_id != workspace_id or chunk.document_id not in document_ids:
+                raise IndiceInconsistenteError("La evidencia pertenece a otro documento o espacio")
+            esperado = (source_hashes or {}).get(chunk.document_id)
+            if esperado and chunk.document_hash != esperado:
+                raise IndiceInconsistenteError("La evidencia pertenece a otra versión")
+            if dimensiones is None:
+                dimensiones = len(hit.vector)
+            norma = math.hypot(*hit.vector)
+            if (
+                not dimensiones
+                or len(hit.vector) != dimensiones
+                or not math.isfinite(hit.distancia)
+                or any(isinstance(v, bool) or not math.isfinite(v) for v in hit.vector)
+                or not math.isfinite(norma)
+                or norma == 0
+            ):
+                raise IndiceInconsistenteError("El índice contiene vectores o distancias inválidos")
+            if chunk.chunk_id in ids and ids[chunk.chunk_id] != chunk:
+                raise IndiceInconsistenteError("Un chunk_id identifica contenidos diferentes")
+
+            textos_doc = textos_por_doc.setdefault(chunk.document_id, set())
+            clave = identidad_texto(chunk.texto)
+            if chunk.chunk_id not in ids and clave not in textos_doc:
+                pendientes.append(hit)
+            ids[chunk.chunk_id] = chunk
+            textos_doc.add(clave)
+
+        elegidos, evidencia, omitidos = [], [], []
+        lam = self.configuracion.retrieval_lambda_mult
+        fuentes_cubiertas: set[str] = set()
+        k_efectivo = max(self.configuracion.retrieval_k, len(document_ids))
+
+        while pendientes and len(evidencia) < k_efectivo:
+            contexto.chequear()
+
+            def score_candidato(h: CoincidenciaVectorial) -> float:
+                relevancia = lam * h.similitud
+                sim_max = max((_coseno(h.vector, el.vector) for el in elegidos), default=0.0)
+                novedad = (1 - lam) * sim_max
+                bonus_equidad = 0.2 if (h.chunk.document_id not in fuentes_cubiertas and h.similitud > 0.1) else 0.0
+                return relevancia - novedad + bonus_equidad
+
+            hit = max(pendientes, key=score_candidato)
+            pendientes.remove(hit)
+            item = EvidenciaRecuperada(chunk=hit.chunk, score=hit.similitud, consulta=consulta.strip())
+            if tokens_evidencia([*evidencia, item], self.tokenizador) > presupuesto:
+                omitidos.append(hit.chunk.chunk_id)
+                continue
+            elegidos.append(hit)
+            evidencia.append(item)
+            fuentes_cubiertas.add(hit.chunk.document_id)
+
+        contexto.chequear()
+        avisos = []
+        if omitidos:
+            avisos.append("Se omitieron chunks completos por el presupuesto de evidencia.")
+        return ResultadoRecuperacion(
+            evidencia=evidencia,
+            tokens=tokens_evidencia(evidencia, self.tokenizador),
+            chunks_omitidos=omitidos,
+            avisos=avisos,
+        )

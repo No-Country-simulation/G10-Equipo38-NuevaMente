@@ -528,7 +528,12 @@ def crear_app(
         return {"status": "ok", "version": app.version}
 
     app.state.config = ajustes
-    app.state.db = RegistroOperativo(ruta_db=Path(ajustes.data_dir) / "operativo.db")
+    app.state.db = RegistroOperativo(
+        ruta_db=Path(ajustes.data_dir) / "operativo.db",
+        dias_retencion=ajustes.workspace_retention_days,
+        limite_documentos=ajustes.workspace_max_documents,
+        limite_generaciones=ajustes.workspace_max_generations,
+    )
     app.state.storage_provider = (
         proveedor_storage if proveedor_storage is not None else get_storage_provider(configuracion=ajustes)
     )

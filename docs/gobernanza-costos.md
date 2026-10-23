@@ -1,11 +1,24 @@
 # Presupuestos y ciclo de vida (#50)
 
-Los límites de aplicación son 1.000.000.000 bytes de objetos, 20.000 solicitudes
-mensuales, cinco documentos y veinte generaciones conservadas por espacio. Los
-dos primeros pueden reducirse en `OCI_MAX_STORAGE_BYTES` y
-`OCI_MAX_REQUESTS_PER_MONTH`; nunca ampliarse. La reserva de recursos ocurre en la
-misma transacción que la intención/idempotencia: una repetición no consume plazas,
-una lápida libera su plaza y dos solicitudes no pueden sobrepasar el límite.
+Los límites de aplicación base son 1.000.000.000 bytes de objetos y 20.000 solicitudes
+mensuales en OCI, junto con los límites de recursos por espacio: por defecto cinco
+documentos y veinte generaciones conservadas. Las cuotas de OCI pueden reducirse en
+`OCI_MAX_STORAGE_BYTES` y `OCI_MAX_REQUESTS_PER_MONTH` (nunca ampliarse). Los límites
+por espacio son configurables al arrancar el servicio mediante `WORKSPACE_MAX_DOCUMENTS`
+(default: 5, rango 1..100) y `WORKSPACE_MAX_GENERATIONS` (default: 20, rango 1..500).
+
+Los techos defensivos (100 documentos y 500 generaciones) acotan el uso de memoria RAM
+(VM de 12 GB), la indexación en ChromaDB y las consultas de SQLite. La configuración
+se lee al arrancar (requiere reinicio del servicio para aplicarse; no hay recarga en caliente).
+Aumentar un límite amplía la capacidad de retención. Reducir un límite por debajo de los
+recursos ya almacenados no purga ni destruye datos existentes; bloquea nuevas admisiones
+(HTTP 429 `RATE_LIMITED`) hasta que el usuario libere plazas borrando recursos.
+Conservar más recursos en el espacio no consume tokens de Gemini por sí solo: el gasto
+de modelos depende de nuevas ingestas, generaciones y operaciones ejecutadas. Las cuotas OCI,
+la retención de 30 días y los límites de archivo (20 MB / 100 páginas / 100k tokens)
+permanecen invariantes. La reserva de recursos ocurre en la misma transacción que la
+intención/idempotencia: una repetición no consume plazas, una lápida libera su plaza y dos
+solicitudes concurrentes no pueden sobrepasar el límite.
 
 El presupuesto de solicitudes se amplió el 15/10/2026 de 5.000 a 20.000 con
 autorización del responsable del proyecto. Los contadores no se reinician:

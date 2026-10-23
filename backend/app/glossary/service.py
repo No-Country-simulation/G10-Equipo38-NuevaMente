@@ -24,6 +24,7 @@ from app.jobs.manager import ContextoEjecucion, FalloTrabajoError, RechazoCalida
 from app.schemas.enums import JobStatus
 from app.schemas.errors import ErrorAplicacion, ErrorCode
 from app.schemas.glossary import BorradorGlosario, GlossaryOutput, TerminoGlosario
+from app.schemas.pedagogical import Referencia
 from app.schemas.requests import GenerateRequest
 from app.storage.provider import StorageUnavailable
 
@@ -137,39 +138,77 @@ class ServicioGlosario:
     # con este metodo genero una clave criptografica unica (hash sha256) a partir de los parametros del glosario
     # esta huella permite reutilizar definiciones ya aprobadas cuando se solicitan los mismos terminos y modelos
     def clave_cache(self, workspace_id, fuente, solicitud):
-        datos = dict(
-            workspace_id=workspace_id,
-            fuente=fuente.model_dump(mode="json"),
-            perfil=solicitud.perfil_destinatario.value,
-            idioma=solicitud.idioma_salida.value,
-            generation_model=self.cfg.gemini_generation_model,
-            verification_model=self.cfg.gemini_verification_model,
-            embedding_model=self.cfg.gemini_embedding_model,
-            prompt_version=GLOSSARY_PROMPT_VERSION,
-            base_prompt_version=PROMPT_VERSION,
-            detector_version=DETECTOR_VERSION,
-            parser_config=json.loads(self.db.obtener_documento(fuente.document_id)["metadatos_json"])[
+        if isinstance(fuente, list):
+            fuentes = fuente
+        else:
+            fuentes = [fuente]
+
+        if len(fuentes) == 1:
+            f0 = fuentes[0]
+            parser_config = json.loads(self.db.obtener_documento(f0.document_id)["metadatos_json"])[
                 "huella_config_parser"
-            ],
-        )
+            ]
+            datos = dict(
+                workspace_id=workspace_id,
+                fuente=f0.model_dump(mode="json"),
+                perfil=solicitud.perfil_destinatario.value,
+                idioma=solicitud.idioma_salida.value,
+                generation_model=self.cfg.gemini_generation_model,
+                verification_model=self.cfg.gemini_verification_model,
+                embedding_model=self.cfg.gemini_embedding_model,
+                prompt_version=GLOSSARY_PROMPT_VERSION,
+                base_prompt_version=PROMPT_VERSION,
+                detector_version=DETECTOR_VERSION,
+                parser_config=parser_config,
+            )
+        else:
+            fuentes_ordenadas = sorted(fuentes, key=lambda f: f.document_id)
+            parser_configs = {
+                f.document_id: json.loads(self.db.obtener_documento(f.document_id)["metadatos_json"])[
+                    "huella_config_parser"
+                ]
+                for f in fuentes_ordenadas
+            }
+            datos = dict(
+                workspace_id=workspace_id,
+                fuentes=[f.model_dump(mode="json") for f in fuentes_ordenadas],
+                parser_configs=parser_configs,
+                perfil=solicitud.perfil_destinatario.value,
+                idioma=solicitud.idioma_salida.value,
+                generation_model=self.cfg.gemini_generation_model,
+                verification_model=self.cfg.gemini_verification_model,
+                embedding_model=self.cfg.gemini_embedding_model,
+                prompt_version=GLOSSARY_PROMPT_VERSION,
+                base_prompt_version=PROMPT_VERSION,
+                detector_version=DETECTOR_VERSION,
+            )
         return hashlib.sha256(json.dumps(datos, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
     # en este punto de entrada admito la solicitud de glosario verificando la vigencia del documento en la base de datos
     # si existe un resultado identico en cache lo reutilizo evitando invocar nuevamente a los modelos de lenguaje
     def encolar(self, token, solicitud, clave=None):
-        fuente = self.consulta.fuente_aprobada(token, solicitud.document_id)
+        doc_ids = solicitud.document_ids or ([solicitud.document_id] if solicitud.document_id else [])
+        fuentes = [self.consulta.fuente_aprobada(token, d_id) for d_id in doc_ids]
         ws = self.consulta._sesion(token)["workspace_id"]
-        cache_key = self.clave_cache(ws, fuente, solicitud)
+        fuente_arg = fuentes[0] if len(fuentes) == 1 else fuentes
+        cache_key = self.clave_cache(ws, fuente_arg, solicitud)
+        if len(fuentes) == 1:
+            scope_hash = fuentes[0].hash
+        else:
+            scope_hash = hashlib.sha256(
+                "".join(sorted(f"{f.document_id}:{f.hash}" for f in fuentes)).encode()
+            ).hexdigest()
 
         def preparar():
             if self.generador is None or self.verificador is None or self.retriever is None:
                 raise ErrorAplicacion(
                     ErrorCode.PROVIDER_UNAVAILABLE, "El glosario requiere proveedores y cuotas explícitos."
                 )
-            actual = self.db.obtener_documento(solicitud.document_id)
+            for f in fuentes:
+                actual = self.db.obtener_documento(f.document_id)
+                if actual is None or actual["estado"] != "ready" or actual["hash"] != f.hash:
+                    raise ErrorAplicacion(ErrorCode.INVALID_STATE, "La fuente cambió durante la admisión.")
             self.consulta._sesion(token)
-            if actual is None or actual["estado"] != "ready" or actual["hash"] != fuente.hash:
-                raise ErrorAplicacion(ErrorCode.INVALID_STATE, "La fuente cambió durante la admisión.")
 
         return admitir_trabajo(
             self.gestor,
@@ -181,6 +220,8 @@ class ServicioGlosario:
             clave=clave,
             cache_key=cache_key,
             preparar=preparar,
+            document_ids=doc_ids,
+            scope_hash=scope_hash,
         )
 
     # con esta funcion confirmo que el glosario almacenado pertenezca a la sesion activa y al documento vigente
@@ -198,18 +239,20 @@ class ServicioGlosario:
             or job["document_id"] != glosario.documento_fuente.document_id
         ):
             raise ErrorAplicacion(ErrorCode.NOT_FOUND, "Glosario no encontrado.")
+        fuentes_a_validar = glosario.documentos_fuente or [glosario.documento_fuente]
         if token is not None:
             if self.consulta._sesion(token)["workspace_id"] != workspace_id:
                 raise ErrorAplicacion(ErrorCode.NOT_FOUND, "Glosario no encontrado.")
-            fuente = self.consulta.fuente_aprobada(token, glosario.documento_fuente.document_id)
+            for doc_fuente in fuentes_a_validar:
+                fuente = self.consulta.fuente_aprobada(token, doc_fuente.document_id)
+                if fuente != doc_fuente:
+                    raise ErrorAplicacion(ErrorCode.NOT_FOUND, "El glosario no corresponde a la fuente vigente.")
         else:
             ctx = ContextoEjecucion("consulta_glosario", workspace_id, "consulta", time.monotonic() + 30)
-            doc = self.consulta.documento_grafo(ctx, glosario.documento_fuente.document_id)
-            if doc is None:
-                raise ErrorAplicacion(ErrorCode.NOT_FOUND, "Glosario no encontrado.")
-            fuente = doc.fuente
-        if fuente != glosario.documento_fuente:
-            raise ErrorAplicacion(ErrorCode.NOT_FOUND, "El glosario no corresponde a la fuente vigente.")
+            for doc_fuente in fuentes_a_validar:
+                doc = self.consulta.documento_grafo(ctx, doc_fuente.document_id)
+                if doc is None or doc.fuente != doc_fuente:
+                    raise ErrorAplicacion(ErrorCode.NOT_FOUND, "El glosario no corresponde a la fuente vigente.")
         return glosario
 
     def consultar(self, token, glossary_id):
@@ -226,20 +269,32 @@ class ServicioGlosario:
         return salida
 
     def ejecutar(self, solicitud, ctx, cache_key):
-        doc = self.consulta.documento_grafo(ctx, solicitud.document_id)
-        if doc is None:
-            raise TrabajoCanceladoError()
-        if self.clave_cache(ctx.workspace_id, doc.fuente, solicitud) != cache_key:
+        doc_ids = solicitud.document_ids or ([solicitud.document_id] if solicitud.document_id else [])
+        docs = []
+        for d_id in doc_ids:
+            d = self.consulta.documento_grafo(ctx, d_id)
+            if d is None:
+                raise TrabajoCanceladoError()
+            docs.append(d)
+        doc = docs[0]
+        fuentes = [d.fuente for d in docs]
+        fuente_arg = fuentes[0] if len(fuentes) == 1 else fuentes
+        if self.clave_cache(ctx.workspace_id, fuente_arg, solicitud) != cache_key:
             raise FalloTrabajoError("INVALID_STATE", "La fuente o configuración cambió antes de ejecutar.")
-        chunks = self.consulta.indice.listar_chunks(
-            ctx.workspace_id, solicitud.document_id, contexto=ctx, source_hash=doc.fuente.hash
-        )
+        chunks = []
+        for d in docs:
+            d_chunks = self.consulta.indice.listar_chunks(
+                ctx.workspace_id, d.fuente.document_id, contexto=ctx, source_hash=d.fuente.hash
+            )
+            chunks.extend(d_chunks)
+
         # Recalcular en los chunks autorizados también verifica los inventarios
         # legacy, sin escribir manifiestos ni invalidar generaciones aprobadas.
         candidatos, omitidos = detectar_candidatos(chunks, chequear=ctx.chequear)
         base = dict(
             glossary_id=ctx.job_id,
             documento_fuente=doc.fuente,
+            documentos_fuente=fuentes,
             perfil_destinatario=solicitud.perfil_destinatario,
             idioma_salida=solicitud.idioma_salida,
             candidatos_omitidos=omitidos,
@@ -249,9 +304,10 @@ class ServicioGlosario:
 
         def revalidar():
             ctx.chequear()
-            actual = self.consulta.documento_grafo(ctx, solicitud.document_id)
-            if actual is None or actual.fuente != doc.fuente:
-                raise TrabajoCanceladoError()
+            for d in docs:
+                actual = self.consulta.documento_grafo(ctx, d.fuente.document_id)
+                if actual is None or actual.fuente != d.fuente:
+                    raise TrabajoCanceladoError()
 
         if not candidatos:
             revalidar()
@@ -283,6 +339,7 @@ class ServicioGlosario:
         )
         parametros = GenerateRequest(
             document_id=solicitud.document_id,
+            document_ids=doc_ids,
             perfil_destinatario=solicitud.perfil_destinatario,
             idioma_salida=solicitud.idioma_salida,
             formato_salida="flashcards",
@@ -294,6 +351,7 @@ class ServicioGlosario:
                 workspace_id=ctx.workspace_id,
                 generation_id=ctx.job_id,
                 document_id=solicitud.document_id,
+                document_ids=doc_ids,
                 parametros=parametros,
                 deadline=ctx.deadline,
             ),
@@ -326,6 +384,7 @@ class ServicioGlosario:
             aprobado = finalizer(revisado, bucket=self.cfg.oci_bucket_name, created_at=base["created_at"])
         else:
             aprobado = None
+        chunk_a_doc = {c.chunk_id: c.document_id for c in chunks}
         originales = {t.id: t for t in candidatos}
         terminos = []
         for termino in adaptador.ultimo.terminos:
@@ -333,6 +392,19 @@ class ServicioGlosario:
             datos = termino.model_dump()
             if termino.estado == "sin_definicion_suficiente":
                 datos.update(referencias=original.ubicaciones, limitacion=_TEXTOS[solicitud.idioma_salida.value][2])
+            else:
+                nuevas_refs = []
+                for r in termino.referencias:
+                    doc_ref = r.document_id or chunk_a_doc.get(r.chunk_id)
+                    nuevas_refs.append(
+                        Referencia(
+                            chunk_id=r.chunk_id,
+                            pagina=r.pagina,
+                            seccion=r.seccion,
+                            document_id=doc_ref,
+                        )
+                    )
+                datos["referencias"] = nuevas_refs
             terminos.append(
                 TerminoGlosario(
                     **datos, termino_original=original.termino_original, es_identificador=original.es_identificador

@@ -125,17 +125,17 @@ def researcher(estado: EstadoGrafo, dependencias: DependenciasResearcher) -> dic
         actual = supervisor(estado, dependencias.grafo)
         if "error" in actual:
             raise _Bloqueo(actual["error"].code, actual["error"].message, actual["status"])
-        if any(
-            actual.get(c) != getattr(estado, c)
-            for c in (
-                "source_hash",
-                "documento_fuente",
-                "idioma_origen",
-                "secciones_disponibles",
-                "restricciones",
-                "rubrica",
-            )
-        ):
+        campos = [
+            "source_hash",
+            "documento_fuente",
+            "idioma_origen",
+            "secciones_disponibles",
+            "restricciones",
+            "rubrica",
+        ]
+        if len(estado.document_ids) > 1:
+            campos.extend(["source_hashes", "documentos_fuente"])
+        if any(actual.get(c) != getattr(estado, c) for c in campos):
             raise _Bloqueo("INVALID_STATE", "La fuente o el alcance cambiaron durante la investigación.")
 
     try:
@@ -144,52 +144,40 @@ def researcher(estado: EstadoGrafo, dependencias: DependenciasResearcher) -> dic
             raise _Bloqueo("INVALID_STATE", "Researcher requiere el estado preparado por Supervisor.")
         if estado.intento >= 3:
             raise _Bloqueo("MAX_ATTEMPTS", "Se agotaron las tres redacciones disponibles.", JobStatus.REJECTED_QUALITY)
-        # obtengo el inventario completo de fragmentos disponibles en la base vectorial para verificar la cobertura total del documento
-        chunks = recuperador.indice.listar_chunks(
-            ctx.workspace_id,
-            estado.document_id,
-            contexto=ctx,
-            source_hash=estado.source_hash,
-        )
-        revalidar()
-        if not chunks:
-            raise _Bloqueo("INVALID_STATE", "El documento no tiene un índice disponible.")
-        originales = {c.chunk_id: c for c in chunks}
-        secciones = tuple(dict.fromkeys(seccion_del_chunk(c) for c in chunks))
-        if set(secciones) != set(estado.secciones_disponibles):
-            raise _Bloqueo(
-                "INVALID_STATE", "Las secciones del registro y del índice no coinciden; reconstruir el índice."
+
+        doc_ids = estado.document_ids or ([estado.document_id] if estado.document_id else [])
+        es_multi = len(doc_ids) > 1
+
+        chunks = []
+        if es_multi:
+            for d_id in doc_ids:
+                d_hash = estado.source_hashes.get(d_id, estado.source_hash)
+                d_chunks = recuperador.indice.listar_chunks(
+                    ctx.workspace_id,
+                    d_id,
+                    contexto=ctx,
+                    source_hash=d_hash,
+                )
+                if not d_chunks:
+                    raise _Bloqueo("INVALID_STATE", f"El documento {d_id} no tiene un índice disponible.")
+                chunks.extend(d_chunks)
+        else:
+            chunks = recuperador.indice.listar_chunks(
+                ctx.workspace_id,
+                estado.document_id,
+                contexto=ctx,
+                source_hash=estado.source_hash,
             )
-        alcance = estado.parametros.alcance
-        objetivo = [alcance.seccion_id] if alcance.tipo == "seccion" else list(secciones)
-        pools = {s: [] for s in objetivo}
-        titulos = {seccion_del_chunk(c): c.seccion or seccion_del_chunk(c) for c in chunks}
+            if not chunks:
+                raise _Bloqueo("INVALID_STATE", "El documento no tiene un índice disponible.")
+
+        revalidar()
+        originales = {c.chunk_id: c for c in chunks}
         evidencia, ids, textos, omitidos = [], set(), set(), set()
         max_tokens = recuperador.max_tokens
 
-        def validar(item):
-            original = originales.get(item.chunk.chunk_id)
-            if original is None or original != item.chunk or seccion_del_chunk(item.chunk) not in pools:
-                raise IndiceInconsistenteError("Evidencia ajena al inventario o alcance autorizados")
-            return item
-
-        def consultar(consulta, seccion, presupuesto):
-            revalidar()
-            resultado = recuperador.recuperar(
-                ctx.workspace_id,
-                estado.document_id,
-                consulta,
-                contexto=ctx,
-                seccion=seccion,
-                presupuesto_tokens=presupuesto,
-                source_hash=estado.source_hash,
-            )
-            revalidar()
-            omitidos.update(resultado.chunks_omitidos)
-            return [validar(item) for item in resultado.evidencia]
-
         def agregar(item):
-            clave = identidad_texto(item.chunk.texto)
+            clave = (item.chunk.document_id, identidad_texto(item.chunk.texto))
             if item.chunk.chunk_id in ids or clave in textos:
                 return False
             if tokens_evidencia([*evidencia, item], recuperador.tokenizador) > max_tokens:
@@ -200,65 +188,181 @@ def researcher(estado: EstadoGrafo, dependencias: DependenciasResearcher) -> dic
             textos.add(clave)
             return True
 
-        for item in estado.evidencia:
-            item = validar(item)
-            pools[seccion_del_chunk(item.chunk)].append(item)
-        faltantes = []
-
-        def consulta_seccion(seccion, ampliada=False):
-            base = _consulta(estado, seccion, ampliada=ampliada, titulo_seccion=titulos[seccion])
-            return ((dependencias.pregunta or "") + " | " + base)[:2000] if dependencias.pregunta else base
-
-        # aqui recorro cada seccion requerida e intento recuperar al menos un fragmento para garantizar cobertura completa
-        for seccion in objetivo:
-            if not pools[seccion]:
-                restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
-                if restante > 0:
-                    pools[seccion] = consultar(consulta_seccion(seccion), seccion, restante)
-                else:
-                    omitidos.update(c.chunk_id for c in chunks if seccion_del_chunk(c) == seccion)
-            elegido = next((item for item in pools[seccion] if agregar(item)), None)
-            if elegido is None:
-                restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
-                if restante > 0:
-                    ampliacion = consultar(consulta_seccion(seccion, True), seccion, restante)
-                    pools[seccion].extend(ampliacion)
-                    elegido = next((item for item in ampliacion if agregar(item)), None)
-            if elegido is None:
-                faltantes.append(seccion)
-        if faltantes:
-            code = "EVIDENCE_BUDGET" if omitidos else "COVERAGE_INCOMPLETE"
-            raise _Bloqueo(
-                code,
-                "No se pudo reunir evidencia para estas secciones: "
-                + ", ".join(faltantes)
-                + ". Acotá el alcance o aumentá el presupuesto dentro del límite permitido.",
-                JobStatus.REJECTED_QUALITY,
-            )
-        # Las solicitudes previas de Critic tienen prioridad sobre extras opcionales.
-        # proceso las solicitudes de evidencia adicionales enviadas previamente por el agente critico respetando el presupuesto de tokens
-        for consulta in dict.fromkeys(estado.solicitudes_evidencia):
-            restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
-            if restante <= 0:
+        if not es_multi:
+            secciones = tuple(dict.fromkeys(seccion_del_chunk(c) for c in chunks))
+            if set(secciones) != set(estado.secciones_disponibles):
                 raise _Bloqueo(
-                    "EVIDENCE_BUDGET",
-                    "No queda presupuesto para ampliar la evidencia solicitada.",
+                    "INVALID_STATE", "Las secciones del registro y del índice no coinciden; reconstruir el índice."
+                )
+            alcance = estado.parametros.alcance
+            objetivo = [alcance.seccion_id] if alcance.tipo == "seccion" else list(secciones)
+            pools = {s: [] for s in objetivo}
+            titulos = {seccion_del_chunk(c): c.seccion or seccion_del_chunk(c) for c in chunks}
+
+            def validar(item):
+                original = originales.get(item.chunk.chunk_id)
+                if original is None or original != item.chunk or seccion_del_chunk(item.chunk) not in pools:
+                    raise IndiceInconsistenteError("Evidencia ajena al inventario o alcance autorizados")
+                return item
+
+            def consultar(consulta, seccion, presupuesto):
+                revalidar()
+                resultado = recuperador.recuperar(
+                    ctx.workspace_id,
+                    estado.document_id,
+                    consulta,
+                    contexto=ctx,
+                    seccion=seccion,
+                    presupuesto_tokens=presupuesto,
+                    source_hash=estado.source_hash,
+                )
+                revalidar()
+                omitidos.update(resultado.chunks_omitidos)
+                return [validar(item) for item in resultado.evidencia]
+
+            for item in estado.evidencia:
+                item = validar(item)
+                pools[seccion_del_chunk(item.chunk)].append(item)
+            faltantes = []
+
+            def consulta_seccion(seccion, ampliada=False):
+                base = _consulta(estado, seccion, ampliada=ampliada, titulo_seccion=titulos[seccion])
+                return ((dependencias.pregunta or "") + " | " + base)[:2000] if dependencias.pregunta else base
+
+            for seccion in objetivo:
+                if not pools[seccion]:
+                    restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
+                    if restante > 0:
+                        pools[seccion] = consultar(consulta_seccion(seccion), seccion, restante)
+                    else:
+                        omitidos.update(c.chunk_id for c in chunks if seccion_del_chunk(c) == seccion)
+                elegido = next((item for item in pools[seccion] if agregar(item)), None)
+                if elegido is None:
+                    restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
+                    if restante > 0:
+                        ampliacion = consultar(consulta_seccion(seccion, True), seccion, restante)
+                        pools[seccion].extend(ampliacion)
+                        elegido = next((item for item in ampliacion if agregar(item)), None)
+                if elegido is None:
+                    faltantes.append(seccion)
+            if faltantes:
+                code = "EVIDENCE_BUDGET" if omitidos else "COVERAGE_INCOMPLETE"
+                raise _Bloqueo(
+                    code,
+                    "No se pudo reunir evidencia para estas secciones: "
+                    + ", ".join(faltantes)
+                    + ". Acotá el alcance o aumentá el presupuesto dentro del límite permitido.",
                     JobStatus.REJECTED_QUALITY,
                 )
-            nuevos = consultar(consulta, alcance.seccion_id if alcance.tipo == "seccion" else None, restante)
-            if not nuevos:
+
+            for consulta in dict.fromkeys(estado.solicitudes_evidencia):
+                restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
+                if restante <= 0:
+                    raise _Bloqueo(
+                        "EVIDENCE_BUDGET",
+                        "No queda presupuesto para ampliar la evidencia solicitada.",
+                        JobStatus.REJECTED_QUALITY,
+                    )
+                nuevos = consultar(consulta, alcance.seccion_id if alcance.tipo == "seccion" else None, restante)
+                if not nuevos:
+                    raise _Bloqueo(
+                        "COVERAGE_INCOMPLETE",
+                        "No se encontró evidencia para una ampliación solicitada por Critic.",
+                        JobStatus.REJECTED_QUALITY,
+                    )
+                for item in nuevos:
+                    agregar(item)
+
+            for ronda in range(max((len(pool) for pool in pools.values()), default=0)):
+                for pool in pools.values():
+                    ctx.chequear()
+                    if ronda < len(pool):
+                        agregar(pool[ronda])
+        else:
+            # Flujo multi-documental: investigación equitativa entre fuentes autorizadas
+            pools = {d_id: [] for d_id in doc_ids}
+            titulos = {
+                d_id: next((f.titulo for f in estado.documentos_fuente if f.document_id == d_id), d_id)
+                for d_id in doc_ids
+            }
+
+            def validar_multi(item):
+                original = originales.get(item.chunk.chunk_id)
+                if original is None or original != item.chunk or item.chunk.document_id not in pools:
+                    raise IndiceInconsistenteError("Evidencia ajena al inventario o alcance autorizados")
+                return item
+
+            def consultar_multi(consulta, presupuesto):
+                revalidar()
+                resultado = recuperador.recuperar_multidocumental(
+                    ctx.workspace_id,
+                    doc_ids,
+                    consulta,
+                    contexto=ctx,
+                    presupuesto_tokens=presupuesto,
+                    source_hashes=estado.source_hashes,
+                )
+                revalidar()
+                omitidos.update(resultado.chunks_omitidos)
+                return [validar_multi(item) for item in resultado.evidencia]
+
+            for item in estado.evidencia:
+                item = validar_multi(item)
+                pools[item.chunk.document_id].append(item)
+
+            idioma_idx = {"es": 0, "en": 1, "pt": 2}.get(estado.idioma_origen, 0)
+            solicitud = estado.parametros
+            formato = _FORMATOS[solicitud.formato_salida.value][idioma_idx]
+            perfil = _PERFILES[solicitud.perfil_destinatario.value][idioma_idx]
+
+            faltantes = []
+            for d_id in doc_ids:
+                if not pools[d_id]:
+                    restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
+                    if restante > 0:
+                        consulta_doc = f"{titulos[d_id][:300]} | {formato} | {perfil}"[:2000]
+                        if dependencias.pregunta:
+                            consulta_doc = f"{dependencias.pregunta} | {consulta_doc}"[:2000]
+                        res = consultar_multi(consulta_doc, restante)
+                        for r in res:
+                            pools[r.chunk.document_id].append(r)
+                elegido = next((item for item in pools[d_id] if agregar(item)), None)
+                if elegido is None:
+                    faltantes.append(d_id)
+
+            if faltantes:
+                code = "EVIDENCE_BUDGET" if omitidos else "COVERAGE_INCOMPLETE"
                 raise _Bloqueo(
-                    "COVERAGE_INCOMPLETE",
-                    "No se encontró evidencia para una ampliación solicitada por Critic.",
+                    code,
+                    "No se pudo reunir evidencia para todas las fuentes autorizadas: " + ", ".join(faltantes) + ".",
                     JobStatus.REJECTED_QUALITY,
                 )
-            for item in nuevos:
-                agregar(item)
-        for ronda in range(max((len(pool) for pool in pools.values()), default=0)):
-            for pool in pools.values():
-                ctx.chequear()
-                if ronda < len(pool):
-                    agregar(pool[ronda])
+
+            for consulta in dict.fromkeys(estado.solicitudes_evidencia):
+                restante = max_tokens - tokens_evidencia(evidencia, recuperador.tokenizador)
+                if restante <= 0:
+                    raise _Bloqueo(
+                        "EVIDENCE_BUDGET",
+                        "No queda presupuesto para ampliar la evidencia solicitada.",
+                        JobStatus.REJECTED_QUALITY,
+                    )
+                nuevos = consultar_multi(consulta, restante)
+                if not nuevos:
+                    raise _Bloqueo(
+                        "COVERAGE_INCOMPLETE",
+                        "No se encontró evidencia para una ampliación solicitada por Critic.",
+                        JobStatus.REJECTED_QUALITY,
+                    )
+                for item in nuevos:
+                    agregar(item)
+
+            for ronda in range(max((len(p) for p in pools.values()), default=0)):
+                for pool in pools.values():
+                    ctx.chequear()
+                    if ronda < len(pool):
+                        agregar(pool[ronda])
+
+            objetivo = list(dict.fromkeys(seccion_del_chunk(e.chunk) for e in evidencia))
         revalidar()
         cfg = recuperador.configuracion
         # registro los metadatos completos de trazabilidad incluyendo modelos utilizados versiones de prompts y configuracion de busqueda

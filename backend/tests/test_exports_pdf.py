@@ -121,3 +121,33 @@ def test_cache_pdf_concurrencia_reinicio_e_integridad(espacio_exportaciones):
     e.storage.upload(clave_export("ws_estudio", e.paquete.generation_id, "pdf"), b"ajeno")
     with pytest.raises(StorageUnavailable):
         servicio.descargar(e.token, e.paquete.generation_id, "pdf")
+
+
+def test_renderizar_pdf_multidocumento(espacio_exportaciones):
+    e = espacio_exportaciones
+    import io
+
+    from app.exports.pdf import renderizar_pdf
+    from app.schemas.pedagogical import Referencia
+    from app.schemas.responses import DocumentoFuente
+    from pypdf import PdfReader
+
+    p = e.paquete.model_copy(deep=True)
+    f1 = DocumentoFuente(document_id="doc1", titulo="Doc 1", version="v1", hash="hash1", procedencia="p1")
+    f2 = DocumentoFuente(document_id="doc2", titulo="Doc 2", version="v2", hash="hash2", procedencia="p2")
+    p.documento_fuente = f1
+    p.documentos_fuente = [f1, f2]
+    refs = [
+        Referencia(document_id="doc1", chunk_id="chk1", pagina=1, seccion="Sec A"),
+        Referencia(document_id="doc2", chunk_id="chk2", pagina=2, seccion="Sec B"),
+    ]
+    if hasattr(p.contenido_adaptado, "items"):
+        p.contenido_adaptado.items[0].referencias = refs
+    elif hasattr(p.contenido_adaptado, "preguntas"):
+        p.contenido_adaptado.preguntas[0].referencias = refs
+    salida = renderizar_pdf(p)
+    lector = PdfReader(io.BytesIO(salida))
+    texto_total = "".join(pag.extract_text() for pag in lector.pages)
+    assert "Doc 1" in texto_total and "Doc 2" in texto_total
+    assert "doc1" in texto_total
+    assert "doc2" in texto_total

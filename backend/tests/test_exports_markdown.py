@@ -216,3 +216,28 @@ def test_fallo_derivado_es_visible_y_reintento_conserva_canonico(espacio_exporta
     servicio.preparar("ws_estudio", paquete, canonico, lambda: None)
     assert e.storage.get(clave_output("ws_estudio", paquete.generation_id)) == canonico
     assert servicio.descargar(e.token, paquete.generation_id, "md").contenido
+
+
+def test_renderizar_markdown_multidocumento(espacio_exportaciones):
+    e = espacio_exportaciones
+    from app.schemas.pedagogical import Referencia
+    from app.schemas.responses import DocumentoFuente
+
+    p = e.paquete.model_copy(deep=True)
+    f1 = DocumentoFuente(document_id="doc1", titulo="Doc 1", version="v1", hash="hash1", procedencia="p1")
+    f2 = DocumentoFuente(document_id="doc2", titulo="Doc 2", version="v2", hash="hash2", procedencia="p2")
+    p.documento_fuente = f1
+    p.documentos_fuente = [f1, f2]
+    refs = [
+        Referencia(document_id="doc1", chunk_id="chk1", pagina=1, seccion="Sec A"),
+        Referencia(document_id="doc2", chunk_id="chk2", pagina=2, seccion="Sec B"),
+    ]
+    if hasattr(p.contenido_adaptado, "items"):
+        p.contenido_adaptado.items[0].referencias = refs
+    elif hasattr(p.contenido_adaptado, "preguntas"):
+        p.contenido_adaptado.preguntas[0].referencias = refs
+    salida = renderizar_markdown(p).decode("utf-8")
+    assert "Documentos fuente" in salida
+    assert "Doc 1" in salida and "Doc 2" in salida
+    assert "Documento: doc1" in salida
+    assert "Documento: doc2" in salida

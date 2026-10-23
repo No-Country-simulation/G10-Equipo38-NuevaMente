@@ -60,7 +60,9 @@ jobs:
 
     # Techo de duración: suficiente para la suite completa de tests más las
     # validaciones de integración y exportaciones añadidas (#44, #45, #52).
-    timeout-minutes: 15
+    # El soporte multidocumental añadió validaciones por fuente que alargan
+    # la suite (~30% medido); se amplía el techo para que no corte el job.
+    timeout-minutes: 25
 
     # "matrix" = ejecutar la MISMA receta una vez por combinación de valores.
     # Hoy una sola: Python 3.11, el target del proyecto (§12.3). Mañana,

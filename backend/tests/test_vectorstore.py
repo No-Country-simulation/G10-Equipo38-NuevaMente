@@ -568,3 +568,22 @@ def test_lapida_de_documento_en_workspace_impide_reconstruccion(pila, mock_stora
     assert indice.contar("espacio-a", "doc-a", contexto=ctx()) == 0
 
     assert doble.llamadas_embeddings == 0
+
+
+def test_buscar_multidocumental_vacio_y_autorizacion(pila):
+    indice, doble = pila
+    assert indice.buscar_multidocumental("espacio-a", [], "consulta", contexto=ctx()) == []
+    with pytest.raises(PermissionError):
+        indice.buscar_multidocumental("espacio-a", ["doc-a"], "consulta", contexto=ctx(workspace="otro"))
+
+
+def test_buscar_multidocumental_cruza_fuentes_activas(pila):
+    indice, doble = pila
+    indice.indexar("espacio-a", "doc-1", chunks("doc-1", "espacio-a", "Protocolos de red VCN."), contexto=ctx())
+    indice.indexar("espacio-a", "doc-2", chunks("doc-2", "espacio-a", "Seguridad y subredes."), contexto=ctx())
+    encontrados = indice.buscar_multidocumental(
+        "espacio-a", ["doc-1", "doc-2"], "redes y subredes", contexto=ctx(), limite=10
+    )
+    doc_ids = {hit.chunk.document_id for hit in encontrados}
+    assert "doc-1" in doc_ids and "doc-2" in doc_ids
+    assert all(hit.chunk.workspace_id == "espacio-a" for hit in encontrados)

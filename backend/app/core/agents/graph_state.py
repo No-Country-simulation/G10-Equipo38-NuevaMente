@@ -111,11 +111,16 @@ class EstadoGrafo(ContratoGrafo):
     workspace_id: str = Field(min_length=1)
     generation_id: str = Field(min_length=1)
     document_id: str | None = None
+    document_ids: list[str] = Field(default_factory=list)
     parametros: GenerateRequest | None = None
     documento_fuente: DocumentoFuente | None = None
+    documentos_fuente: list[DocumentoFuente] = Field(default_factory=list)
     source_hash: str | None = None
+    source_hashes: dict[str, str] = Field(default_factory=dict)
     idioma_origen: IdiomaOrigen | None = None
+    idiomas_origen: dict[str, IdiomaOrigen] = Field(default_factory=dict)
     secciones_disponibles: tuple[str, ...] = ()
+    secciones_por_documento: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     secciones_cubiertas: list[str] = Field(default_factory=list)
     evidencia: list[EvidenciaRecuperada] = Field(default_factory=list)
     referencias: list[Referencia] = Field(default_factory=list)

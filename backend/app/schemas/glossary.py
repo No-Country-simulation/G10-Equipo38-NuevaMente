@@ -61,6 +61,10 @@ class GlossaryOutput(ModeloContenido):
     schema_version: Literal["1.0"] = "1.0"
     glossary_id: str
     documento_fuente: DocumentoFuente
+    documentos_fuente: list[DocumentoFuente] = Field(
+        default_factory=list,
+        description="Fuentes autorizadas del glosario (§6.2).",
+    )
     perfil_destinatario: RecipientProfile
     idioma_salida: OutputLanguage
     estado: Literal["verificado", "sin_definiciones", "sin_terminos"]
@@ -73,6 +77,20 @@ class GlossaryOutput(ModeloContenido):
 
     @model_validator(mode="after")
     def aprobado(self):
+        if not self.documentos_fuente and self.documento_fuente:
+            self.documentos_fuente = [self.documento_fuente]
+        elif self.documentos_fuente and not self.documento_fuente:
+            self.documento_fuente = self.documentos_fuente[0]
+        elif self.documento_fuente and self.documentos_fuente:
+            doc_ids = [d.document_id for d in self.documentos_fuente]
+            if self.documento_fuente.document_id not in doc_ids:
+                if len(self.documentos_fuente) <= 1:
+                    self.documentos_fuente = [self.documento_fuente]
+                else:
+                    self.documentos_fuente.insert(0, self.documento_fuente)
+            else:
+                idx = doc_ids.index(self.documento_fuente.document_id)
+                self.documentos_fuente[idx] = self.documento_fuente
         ids = [t.id for t in self.terminos]
         definidos = any(t.estado == "definido" for t in self.terminos)
         if len(ids) != len(set(ids)):

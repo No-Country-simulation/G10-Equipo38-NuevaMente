@@ -200,7 +200,8 @@ class _PlantillaPDF:
             self.agregar(self.l["ninguno"])
 
     def _numero(self, r):
-        clave = (r.chunk_id, r.pagina, r.seccion)
+        doc_id = getattr(r, "document_id", None)
+        clave = (doc_id, r.chunk_id, r.pagina, r.seccion)
         if clave not in self.referencias:
             self.referencias[clave] = len(self.referencias) + 1
         return self.referencias[clave]
@@ -309,30 +310,57 @@ class _PlantillaPDF:
 
     def fuentes(self):
         inicio = len(self.story)
-        fuente = self.paquete.documento_fuente
+        fuentes = getattr(self.paquete, "documentos_fuente", None) or [self.paquete.documento_fuente]
         self.story.append(Spacer(1, 10))
-        self.story.append(
-            self.p(
-                "<b>"
-                + self.l["fuente"]
-                + ":</b> "
-                + _texto(fuente.titulo)
-                + " · <b>"
-                + self.l["version"]
-                + ":</b> "
-                + _texto(fuente.version),
-                "small",
-                marcado=True,
-            )
-        )
-        self.agregar("SHA-256: " + fuente.hash.removeprefix("sha256:"), "small")
-        if fuente.procedencia:
+        if len(fuentes) > 1:
+            self.titulo("fuentes", estilo="h2")
+            for f in fuentes:
+                self.story.append(
+                    self.p(
+                        "<b>"
+                        + self.l["fuente"]
+                        + ":</b> "
+                        + _texto(f.titulo)
+                        + " · <b>"
+                        + self.l["version"]
+                        + ":</b> "
+                        + _texto(f.version),
+                        "small",
+                        marcado=True,
+                    )
+                )
+                self.agregar("SHA-256: " + f.hash.removeprefix("sha256:"), "small")
+                if f.procedencia:
+                    self.story.append(
+                        self.p("<b>" + self.l["procedencia"] + ":</b> " + _texto(f.procedencia), "small", marcado=True)
+                    )
+        else:
+            fuente = fuentes[0]
             self.story.append(
-                self.p("<b>" + self.l["procedencia"] + ":</b> " + _texto(fuente.procedencia), "small", marcado=True)
+                self.p(
+                    "<b>"
+                    + self.l["fuente"]
+                    + ":</b> "
+                    + _texto(fuente.titulo)
+                    + " · <b>"
+                    + self.l["version"]
+                    + ":</b> "
+                    + _texto(fuente.version),
+                    "small",
+                    marcado=True,
+                )
             )
+            self.agregar("SHA-256: " + fuente.hash.removeprefix("sha256:"), "small")
+            if fuente.procedencia:
+                self.story.append(
+                    self.p("<b>" + self.l["procedencia"] + ":</b> " + _texto(fuente.procedencia), "small", marcado=True)
+                )
         self.titulo("referencias", estilo="h2")
-        for (cid, pagina, seccion), n in self.referencias.items():
-            detalle = f"[{n}] {self.l['fragmento']}: " + _texto(cid)
+        for (doc_id, cid, pagina, seccion), n in self.referencias.items():
+            detalle = f"[{n}] "
+            if doc_id:
+                detalle += f"{self.l.get('documento', 'Documento')}: {_texto(doc_id)} · "
+            detalle += f"{self.l['fragmento']}: " + _texto(cid)
             if pagina is not None:
                 detalle += f" · {self.l['pagina']}: {pagina}"
             if seccion is not None:
