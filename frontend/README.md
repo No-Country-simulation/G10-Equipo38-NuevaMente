@@ -1,4 +1,4 @@
-# Frontend React de NuevaMente
+# Frontend de NuevaMente en React
 
 `frontend/` contiene React 18, TypeScript y Vite. #139 retira la implementación
 Streamlit, sus dependencias y sus pruebas exclusivas. La carga de documentos

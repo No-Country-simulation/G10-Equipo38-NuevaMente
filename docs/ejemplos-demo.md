@@ -1,6 +1,6 @@
 # Ejemplos generados previamente
 
-La biblioteca permite abrir adaptaciones ya revisadas y guardadas en OCI sin
+La biblioteca deja abrir adaptaciones ya revisadas y guardadas en OCI sin
 esperar una generación nueva. Conserva fuente, fecha, parámetros y duración del
 trabajo. Comparte los renderizadores del material y las fuentes de la aplicación.
 El quiz empieza sin soluciones; la práctica demo no modifica el progreso privado.

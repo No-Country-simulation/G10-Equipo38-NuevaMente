@@ -1,7 +1,7 @@
 # PDF didáctico (#44)
 
 `GET /api/exports/{generation_id}?format=pdf` devuelve `application/pdf` y un
-archivo `{generation_id}.pdf`. Requiere sesión y una generación `completed`
+archivo `{generation_id}.pdf`. Necesita sesión y una generación `completed`
 autorizada. Conserva los controles de caché, aislamiento, integridad, revocación
 y borrado del router del #43 y los presupuestos del #50.
 

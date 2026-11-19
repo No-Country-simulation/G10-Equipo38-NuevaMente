@@ -2,7 +2,7 @@
 
 ## Alcance y reglas de ejecución
 
-Receta documental de instalación y operación, **etapas 2–4**, contrastada por
+Guía documental de instalación y operación, **etapas 2–4**, contrastada por
 lectura el **17/10/2026** contra la base integrada de `develop`
 `5988244a40fb1f3061c0bafc1fc106eb6e592a0a` (#137/#138/#140).
 El merge local de #58 es `8b97c6b5970cfcb0bae87cc7c7d8923baa40aa9d`.

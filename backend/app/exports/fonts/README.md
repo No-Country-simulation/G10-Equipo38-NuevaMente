@@ -1,7 +1,7 @@
 # Fuentes locales para PDF (#44)
 
 Bitstream Vera 1.10 (regular, bold, italic, bold italic) procede de las fuentes
-distribuidas con `reportlab==5.0.1`. Se conserva `bitstream-vera-license.txt`.
+distribuidas con `reportlab==5.0.1`. Se mantiene `bitstream-vera-license.txt`.
 Es la adaptación para papel de la tipografía sans serif del design system.
 
 JetBrains Mono Regular procede de la versión

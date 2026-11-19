@@ -1,7 +1,7 @@
 # Precarga y recarga de fuentes demo (#49)
 
 Este runbook prepara las tres fuentes de `documents/`: VCN, pagos y salud.
-Es mantenimiento administrativo offline; no expone una ruta de escritura.
+Se trata de mantenimiento administrativo offline; no expone una ruta de escritura.
 Registro documental del **16/10/2026**, `develop` `f292415`: #48 y #49 estaban
 integrados y cerrados; la activación y comprobación públicas se aceptan en
 [#133](https://github.com/No-Country-simulation/G10-Equipo38-NuevaMente/issues/133).

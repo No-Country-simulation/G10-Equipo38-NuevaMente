@@ -8,7 +8,7 @@
 
 NuevaMente transforma documentos técnicos públicos o simulados en material de
 estudio adaptado al perfil, sector, idioma y profundidad que necesita cada persona.
-Ayuda a pasar de una documentación extensa a explicaciones, práctica y fuentes
+Permite pasar de una documentación extensa a explicaciones, práctica y fuentes
 consultables en el mismo espacio.
 
 **Ir a:** [instalación](#instalación-y-ejecución-local) ·
