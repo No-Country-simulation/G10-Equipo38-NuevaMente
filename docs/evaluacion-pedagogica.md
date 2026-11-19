@@ -1,6 +1,6 @@
 # Evaluación pedagógica multilingüe — #60
 
-El conjunto está definido en `docs/evidencia/issue-60/casos.json`: doce casos,
+El conjunto se define en `docs/evidencia/issue-60/casos.json`: doce casos,
 cuatro perfiles por idioma (es/en/pt), al menos tres formatos por idioma y los
 tres documentos demo. Cada fuente queda fijada por SHA-256. Los cinco formatos
 aparecen en el conjunto. El tamaño no permite afirmar calidad general del modelo.
