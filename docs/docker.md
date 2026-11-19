@@ -1,6 +1,6 @@
 # Contenedores locales — Issue 26
 
-Docker Compose ejecuta el backend FastAPI y el frontend React compilado con Vite. Conserva la
+Docker Compose levanta el backend FastAPI y el frontend React compilado con Vite. Conserva la
 arquitectura de `decisiones_proyecto.md` §14 y `docs/arquitectura.md`: un proceso
 Uvicorn, un worker dedicado y un volumen de datos exclusivo del backend.
 La implementación Streamlit fue retirada en #139; sus pruebas históricas no
